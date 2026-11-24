@@ -196,6 +196,14 @@
   .composer { border: 2px solid transparent; background: linear-gradient(var(--panel), var(--panel)) padding-box, linear-gradient(120deg, var(--accent), var(--glow)) border-box; box-shadow: 0 12px 30px -20px color-mix(in srgb, var(--accent) 80%, transparent); }
   .toast { background: linear-gradient(120deg, #1f2937, color-mix(in srgb, var(--side) 70%, #1f2937)); box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--glow) 80%, transparent); }
 
+  /* ほかのアプリへのリンク（見出しの右上） */
+  .app-links { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .app-links:empty { display: none; }
+  .app-links a { font-size: 13px; text-decoration: none; color: var(--accent); background: color-mix(in srgb, var(--glow) 12%, #fff); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 99px; padding: 3px 12px; white-space: nowrap; transition: box-shadow .15s, transform .15s; }
+  .app-links a:hover { box-shadow: 0 0 12px -2px var(--glow); transform: translateY(-1px); }
+  body.plain .app-links a { background: #fff; }
+  body.plain .app-links a:hover { box-shadow: none; transform: none; background: #f1f5fb; }
+
   /* 落ち着いた見た目（「青（落ち着いた）」「アンバー（落ち着いた）」）：グラデーションと光をおさえ、これまでどおりの見た目にする */
   body.plain { background: var(--bg); }
   body.plain .side { background: var(--side); box-shadow: none; }
@@ -233,6 +241,7 @@
         <button class="menu-btn" onclick="toggleSide()">≡</button>
         <h2 id="title">ハコチャット</h2>
         <span id="envTag"></span>
+        <span id="appLinks" class="app-links"></span>
         <input class="search" id="searchBox" placeholder="🔍 検索（Enter）" onkeydown="if(event.key==='Enter')doSearch(this.value)">
         <button class="btn sub small" id="allBtn" style="display:none" onclick="toggleAll()">すべて表示</button>
         <button class="btn small abs" id="absBtn" style="display:none" onclick="openAbsence()">📝 欠席連絡</button>
@@ -599,10 +608,10 @@
     else if (me.role === '指導者') h += '<button class="item" onclick="coachNewChannel()">＋ チャンネルを作る</button>';
     if (me.role === '保護者') h += '<button class="item" onclick="openSettings()">👤 設定（メール：' + (me.notify ? '受け取る' : '止めている') + '）</button>';
     h += (state.res.dataUrl ? '<a href="' + esc(state.res.dataUrl) + '" target="_blank" style="display:block;padding:8px 16px 0">データのスプレッドシート</a>' : '');
-    // ほかのアプリへのリンク（部日誌アプリなど）。全員に出す
-    ((state.res.app && state.res.app.links) || []).forEach(function (l) {
-      h += '<a href="' + esc(l.url) + '" target="_blank" rel="noopener" class="item" style="text-decoration:none">🔗 ' + esc(l.name) + '</a>';
-    });
+    // ほかのアプリへのリンク（ハコ日誌など）は、見出しの右上に出す。全員に出す
+    document.getElementById('appLinks').innerHTML = ((state.res.app && state.res.app.links) || []).map(function (l) {
+      return '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">🔗 ' + esc(l.name) + '</a>';
+    }).join('');
     if (me.isAdmin && state.res.app) {
       h += '<div style="padding:8px 16px 0;opacity:.75">版 ' + esc(state.res.app.version) + '</div>';
       if (state.newVersion) h += '<button class="item" style="color:#ffe08a;font-weight:bold" onclick="go(\'admin\'); adminSet(\'app\')">🆕 新しい版 ' + esc(state.newVersion.version) + ' があります（変更点を見る）</button>';
@@ -1113,7 +1122,7 @@
       '<div class="fbar"><span>色</span><span>' + colors + '</span></div>' +
       linkRows + '<div class="fbar"><span style="width:4.5em"></span><button class="btn sub small" onclick="connectNisshi()">📔 ハコ日誌とつなぐ</button>' +
       '<span class="note" style="margin:0">ハコ日誌のURLを貼るだけで、行き来できるリンクを作ります</span></div>' +
-      '<p class="note" style="margin:0 0 8px">リンクは、左の一覧の下に「🔗 名前」で出ます（全員に見えます）。いっしょに使うアプリのURLを入れて「保存」を押します。</p>' +
+      '<p class="note" style="margin:0 0 8px">リンクは、画面の右上に「🔗 名前」で出ます（全員に見えます）。いっしょに使うアプリのURLを入れて「保存」を押します。</p>' +
       '<div class="fbar"><button class="btn small" onclick="saveAppSettings()">保存</button><span class="note" style="margin:0">版 ' + esc(app.version) + '</span></div>';
   }
   /**
@@ -1133,7 +1142,7 @@
     if (i < 0) { toast('リンクの欄があいていません。使わないリンクを消してから、もう一度押してください'); return; }
     names[i].value = 'ハコ日誌';
     urls[i].value = url;
-    toast('リンクの欄に入れました。「保存」を押すと、左の一覧の下に「🔗 ハコ日誌」が出ます');
+    toast('リンクの欄に入れました。「保存」を押すと、画面の右上に「🔗 ハコ日誌」が出ます');
   }
 
   function previewColor(id) { applyApp(Object.assign({}, state.res.app, { color: id })); }

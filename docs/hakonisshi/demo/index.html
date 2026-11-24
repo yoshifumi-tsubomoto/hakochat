@@ -2022,16 +2022,21 @@ const APP_DEFAULT_NAME = 'ハコ日誌';
 const APP_LINK_MAX = 3;
 
 const APP_COLORS = {
-  navy: ['#1f3a5f', '#2f5a8f'],
-  blue: ['#1c4f9c', '#2f6cc4'],
-  teal: ['#0f5c63', '#1d7f88'],
-  green: ['#25573a', '#367a53'],
-  olive: ['#4a5a1c', '#66792b'],
-  brown: ['#5c3d24', '#7d5636'],
-  orange: ['#8a4316', '#ad5a24'],
-  red: ['#7d2232', '#a03246'],
-  purple: ['#4b3478', '#664a9c'],
-  gray: ['#3a4048', '#565e69'],
+  navy: { name: '紺', side: '#0f2550', side2: '#2b5cb8', accent: '#2563c9', glow: '#5b9dff', active: '#2f5a8f' },
+  blue: { name: '青', side: '#0b3d91', side2: '#1e88e5', accent: '#1a73e8', glow: '#4fc3f7', active: '#2f6cc4' },
+  teal: { name: '青緑', side: '#064e4a', side2: '#0ea5a0', accent: '#0e8c7e', glow: '#2dd4bf', active: '#1d7f88' },
+  green: { name: '緑', side: '#0f4d2c', side2: '#22a35a', accent: '#16a34a', glow: '#4ade80', active: '#367a53' },
+  olive: { name: '若草', side: '#3a5a12', side2: '#7cb518', accent: '#5f8f12', glow: '#a3e635', active: '#66792b' },
+  brown: { name: '琥珀', side: '#6b3a0a', side2: '#d4880f', accent: '#b45309', glow: '#fbbf24', active: '#7d5636' },
+  orange: { name: '橙', side: '#7a2a0c', side2: '#f0652a', accent: '#ea580c', glow: '#fb923c', active: '#ad5a24' },
+  red: { name: '紅', side: '#6d1235', side2: '#e0457b', accent: '#db2777', glow: '#f472b6', active: '#a03246' },
+  pink: { name: 'ピンク', side: '#9d174d', side2: '#f06ab0', accent: '#d6336c', glow: '#f9a8d4', active: '#c2185b' },
+  purple: { name: '紫', side: '#3b1c7a', side2: '#7c4dff', accent: '#7c3aed', glow: '#c084fc', active: '#664a9c' },
+  gray: { name: '夜空', side: '#0f172a', side2: '#4338ca', accent: '#4f46e5', glow: '#818cf8', active: '#565e69' },
+  'plain-navy': { name: '紺（落ち着いた）', plain: true, side: '#1f3a5f', active: '#2f5a8f', accent: '#1a73e8' },
+  'plain-blue': { name: '青（落ち着いた）', plain: true, side: '#1c4f9c', active: '#2f6cc4', accent: '#1a73e8' },
+  'plain-amber': { name: 'アンバー（落ち着いた）', plain: true, side: '#7c4a03', active: '#9a5d07', accent: '#b45309' },
+  'plain-red': { name: '赤（落ち着いた）', plain: true, side: '#7a1f2b', active: '#9a2a38', accent: '#b91c1c' },
 };
 
 function getAppSettings_() {
@@ -2175,7 +2180,7 @@ function saveAppSettings(s) {
   .brand .org { display: block; font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
   .brand .org:empty { display: none; }
 
-  /* 色を選んだとき（アプリの表示）：上の帯を「地」の色、選んだタブを「選択行」の色に（ハコチャットと同じ10色） */
+  /* 色を選んだとき（アプリの表示）：上の帯を「地」の色、選んだタブを「選択行」の色に（落ち着いた色はこのまま。華やかな色は下の「華やかな見た目」も重ねる） */
   body.themed .topbar { background: var(--brand); border-bottom-color: var(--brand); color: #fff; }
   body.themed .brand, body.themed .brand .org, body.themed .me, body.themed .me b { color: #fff; }
   body.themed .tab { color: rgba(255, 255, 255, .8); }
@@ -2427,6 +2432,36 @@ function saveAppSettings(s) {
     .lbl { display: block; }
     .topbar { flex-wrap: wrap; }
   }
+  /* =========================================================
+     華やかな見た目（2026-11-24、ハコチャットとそろえた）：グラデーションと光
+     「アプリの表示」で華やかな色を選んだときだけ（標準（白）と「落ち着いた」色は、これまでの見た目のまま）
+     ========================================================= */
+  body.themed:not(.plain) { background: radial-gradient(1200px 420px at 100% -10%, color-mix(in srgb, var(--glow) 14%, transparent), transparent 60%), var(--bg); }
+  body.themed:not(.plain) .topbar {
+    background:
+      radial-gradient(420px 160px at 0% 0%, color-mix(in srgb, var(--glow) 38%, transparent), transparent 70%),
+      radial-gradient(420px 180px at 100% 100%, color-mix(in srgb, var(--glow) 30%, transparent), transparent 70%),
+      linear-gradient(110deg, var(--brand) 0%, color-mix(in srgb, var(--brand) 55%, var(--brand-2)) 55%, var(--brand-2) 100%);
+    border-bottom-color: transparent;
+    box-shadow: 0 6px 24px -12px color-mix(in srgb, var(--brand) 85%, transparent);
+  }
+  body.themed:not(.plain) .brand { text-shadow: 0 0 18px color-mix(in srgb, var(--glow) 70%, transparent); }
+  body.themed:not(.plain) .tab.is-active {
+    background: linear-gradient(100deg, rgba(255, 255, 255, .28), rgba(255, 255, 255, .1));
+    box-shadow: inset 0 -3px 0 var(--glow), 0 0 18px -4px color-mix(in srgb, var(--glow) 85%, transparent);
+    backdrop-filter: blur(4px);
+  }
+  body.themed:not(.plain) .tlinks a { background: color-mix(in srgb, var(--glow) 12%, #fff); border-color: color-mix(in srgb, var(--accent) 45%, transparent); transition: box-shadow .15s, transform .15s; }
+  body.themed:not(.plain) .tlinks a:hover { box-shadow: 0 0 12px -2px var(--glow); transform: translateY(-1px); }
+  body.themed:not(.plain) .primary {
+    background: linear-gradient(110deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--glow)));
+    box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--accent) 85%, transparent);
+    transition: filter .15s, transform .15s, box-shadow .15s;
+  }
+  body.themed:not(.plain) .primary:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--glow) 90%, transparent); }
+  body.themed:not(.plain) .group { box-shadow: 0 1px 2px rgba(16, 24, 40, .04); transition: box-shadow .2s; }
+  body.themed:not(.plain) .group:hover { box-shadow: 0 10px 28px -18px color-mix(in srgb, var(--accent) 70%, transparent); }
+  @media (prefers-reduced-motion: reduce) { body.themed .primary, body.themed .tlinks a, body.themed .group { transition: none; } }
 </style>
 </head>
 <body>
@@ -2827,17 +2862,15 @@ function saveAppSettings(s) {
     $('orgName').textContent = a.orgName || '';
     document.title = a.orgName ? `${a.appName}｜${a.orgName}` : (a.appName || DEFAULT_APP_NAME);
     const c = a.color && a.colors && a.colors[a.color];
-    document.body.classList.toggle('themed', !!c);
-    if (c) {
-      document.body.style.setProperty('--brand', c[0]);
-      document.body.style.setProperty('--brand-sel', c[1]);
-    } else {
-      document.body.style.removeProperty('--brand');
-      document.body.style.removeProperty('--brand-sel');
-    }
+    const b = document.body;
+    b.classList.toggle('themed', !!c);
+    b.classList.toggle('plain', !!(c && c.plain)); // 落ち着いた見た目（グラデーションと光なし）
+    const vars = c ? { '--brand': c.side, '--brand-2': c.side2 || c.active, '--brand-sel': c.active,
+      '--accent': c.accent, '--glow': c.glow || c.accent } : {};
+    ['--brand', '--brand-2', '--brand-sel', '--accent', '--glow'].forEach(k => {
+      if (vars[k]) b.style.setProperty(k, vars[k]); else b.style.removeProperty(k);
+    });
   }
-
-  const COLOR_LABELS = { navy: '紺', blue: '青', teal: '青緑', green: '緑', olive: 'オリーブ', brown: '茶', orange: '橙', red: '赤', purple: '紫', gray: '灰' };
 
   function openAppSettings() {
     const a = S.boot.appSettings || {};
@@ -2847,7 +2880,8 @@ function saveAppSettings(s) {
       el('input', { type: 'radio', name: 'asColor', value: id, checked: (a.color || '') === id }),
       el('span', { class: 'chip-c', style: `background:${bg}` }), label);
     $('asColors').replaceChildren(radio('', '標準（白）', '#ffffff'),
-      ...Object.keys(a.colors || {}).map(id => radio(id, COLOR_LABELS[id] || id, a.colors[id][0])));
+      ...Object.keys(a.colors || {}).map(id => { const c = a.colors[id];
+        return radio(id, c.name, c.plain ? c.side : `linear-gradient(135deg, ${c.side}, ${c.side2})`); }));
     const links = (a.links || []).slice();
     while (links.length < 3) links.push({ name: '', url: '' });
     $('asLinks').replaceChildren(...links.map((l, i) => el('div', { class: 'as-link' },

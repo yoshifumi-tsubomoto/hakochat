@@ -32,4 +32,4 @@
 | 保護者 | 保護者にも公開・保護者のみ | 投稿・返信・スタンプ・子どもの欠席連絡。既読は人数だけが見える |
 
 ## ハコ日誌（付属）
-部活動の日誌のアプリです。ハコチャットの左の一覧の下に、ハコ日誌へのリンクを置けます。紹介：https://yoshifumi-tsubomoto.github.io/hakochat/hakonisshi/
+部活動の日誌のアプリです。ハコチャットの画面の右上に、ハコ日誌へのリンクを置けます。紹介：https://yoshifumi-tsubomoto.github.io/hakochat/hakonisshi/
