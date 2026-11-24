@@ -147,6 +147,81 @@
     table.ftable { font-size: 13px; }
     .thumb img { max-width: 160px; }
   }
+
+  /* =========================================================
+     華やかな見た目（2026-11-24）：グラデーションと光
+     色は「アプリの表示」で選んだ色（--side・--side-2・--accent・--glow）に合わせて変わる
+     ========================================================= */
+  :root { --side-2: #2b5cb8; --glow: #5b9dff; }
+  body { background: radial-gradient(1200px 500px at 100% -10%, color-mix(in srgb, var(--glow) 14%, transparent), transparent 60%), var(--bg); }
+
+  /* 左の一覧：上から下へのグラデーションと、光のにじみ */
+  .side {
+    background:
+      radial-gradient(420px 260px at 0% 0%, color-mix(in srgb, var(--glow) 35%, transparent), transparent 70%),
+      radial-gradient(360px 300px at 100% 100%, color-mix(in srgb, var(--glow) 28%, transparent), transparent 70%),
+      linear-gradient(170deg, var(--side) 0%, color-mix(in srgb, var(--side) 55%, var(--side-2)) 55%, var(--side-2) 100%);
+    box-shadow: 4px 0 24px -12px color-mix(in srgb, var(--side) 80%, transparent);
+  }
+  .side h1 { text-shadow: 0 0 18px color-mix(in srgb, var(--glow) 70%, transparent); letter-spacing: .02em; }
+  .side .item { border-radius: 8px; margin: 1px 8px; width: calc(100% - 16px); padding: 6px 10px; transition: background .15s, box-shadow .15s; }
+  .side .item:hover { background: rgba(255, 255, 255, .12); }
+  .side .item.active {
+    background: linear-gradient(100deg, rgba(255, 255, 255, .26), rgba(255, 255, 255, .08));
+    box-shadow: inset 3px 0 0 var(--glow), 0 0 18px -4px color-mix(in srgb, var(--glow) 80%, transparent);
+    backdrop-filter: blur(4px);
+  }
+  .side .sec { padding-left: 18px; }
+  .badge { background: linear-gradient(120deg, #ff5f6d, #ff2e63); box-shadow: 0 0 10px -1px rgba(255, 46, 99, .8); }
+
+  /* 見出し：うすいガラスと、色の線 */
+  .head { position: relative; background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(8px); }
+  .head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: linear-gradient(90deg, var(--accent), var(--glow), transparent); opacity: .7; }
+  .head h2 { background: linear-gradient(100deg, var(--text), color-mix(in srgb, var(--accent) 70%, var(--text))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tabs button.on { border-bottom-color: transparent; background: linear-gradient(var(--accent), var(--glow)) bottom / 100% 3px no-repeat; }
+
+  /* ボタン：グラデーションと光 */
+  .btn { background: linear-gradient(110deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--glow))); border-color: transparent; box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--accent) 85%, transparent); transition: filter .15s, transform .15s, box-shadow .15s; }
+  .btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--glow) 90%, transparent); }
+  .btn.sub { background: #fff; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: none; }
+  .btn.sub:hover { background: color-mix(in srgb, var(--glow) 10%, #fff); }
+
+  /* スレッド：新着は色のにじみ、ピンは金の縁 */
+  .thread { box-shadow: 0 1px 2px rgba(16, 24, 40, .04); transition: box-shadow .2s; }
+  .thread:hover { box-shadow: 0 10px 28px -18px color-mix(in srgb, var(--accent) 70%, transparent); }
+  .thread.has-new { box-shadow: inset 4px 0 0 var(--unread), 0 10px 30px -18px rgba(217, 48, 37, .55); }
+  .newmark { background: linear-gradient(120deg, #ff5f6d, #ff2e63); box-shadow: 0 0 8px -1px rgba(255, 46, 99, .7); }
+  .chtag { background: color-mix(in srgb, var(--glow) 16%, #fff); color: color-mix(in srgb, var(--side) 70%, var(--accent)); }
+  .react.on { border-color: var(--accent); background: color-mix(in srgb, var(--glow) 18%, #fff); box-shadow: 0 0 10px -4px var(--glow); }
+  .composer { border: 2px solid transparent; background: linear-gradient(var(--panel), var(--panel)) padding-box, linear-gradient(120deg, var(--accent), var(--glow)) border-box; box-shadow: 0 12px 30px -20px color-mix(in srgb, var(--accent) 80%, transparent); }
+  .toast { background: linear-gradient(120deg, #1f2937, color-mix(in srgb, var(--side) 70%, #1f2937)); box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--glow) 80%, transparent); }
+
+  /* 落ち着いた見た目（「青（落ち着いた）」「アンバー（落ち着いた）」）：グラデーションと光をおさえ、これまでどおりの見た目にする */
+  body.plain { background: var(--bg); }
+  body.plain .side { background: var(--side); box-shadow: none; }
+  body.plain .side h1 { text-shadow: none; }
+  body.plain .side .item.active { background: var(--side-active); box-shadow: none; backdrop-filter: none; }
+  body.plain .badge, body.plain .newmark { background: var(--unread); box-shadow: none; }
+  body.plain .head { background: var(--panel); backdrop-filter: none; }
+  body.plain .head::after { display: none; }
+  body.plain .head h2 { background: none; color: var(--text); }
+  body.plain .tabs button.on { background: none; border-bottom-color: var(--accent); }
+  body.plain .btn { background: var(--accent); border-color: var(--accent); box-shadow: none; }
+  body.plain .btn:hover { filter: none; transform: none; box-shadow: none; }
+  body.plain .btn.sub { background: #fff; color: var(--accent); border-color: var(--accent); }
+  body.plain .thread:hover { box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+  body.plain .thread.has-new { box-shadow: inset 4px 0 0 var(--unread); }
+  body.plain .chtag { background: var(--chip); color: var(--side); }
+  body.plain .react.on { background: #e8f0fe; box-shadow: none; }
+  body.plain .composer { background: var(--panel); border: 2px solid var(--accent); box-shadow: none; }
+  body.plain .toast { background: #323232; box-shadow: none; }
+
+  /* 狭い画面：隠れているサイドバーの影がにじまないように */
+  @media (max-width: 760px) {
+    .side { box-shadow: none; }
+    .side.open { box-shadow: 4px 0 24px -6px color-mix(in srgb, var(--side) 80%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) { .btn, .thread, .side .item { transition: none; } }
 </style>
 </head>
 <body data-token="<?= urlToken ?>">
@@ -266,8 +341,14 @@
   function applyApp(app) {
     if (!app) return;
     const c = app.colors.filter(function (x) { return x.id === app.color; })[0] || app.colors[0];
-    document.documentElement.style.setProperty('--side', c.side);
-    document.documentElement.style.setProperty('--side-active', c.active);
+    const st = document.documentElement.style;
+    st.setProperty('--side', c.side);
+    st.setProperty('--side-2', c.side2 || c.active);
+    st.setProperty('--side-active', c.active);
+    st.setProperty('--accent', c.accent || '#1a73e8');
+    st.setProperty('--glow', c.glow || '#5b9dff');
+    // 落ち着いた見た目（グラデーションと光をおさえる）
+    document.body.classList.toggle('plain', !!c.plain);
     document.title = app.name;
   }
   /** 新しい版があるか確かめる（管理者だけ。配布用の版だけ。失敗しても何もしない） */
@@ -282,7 +363,7 @@
       v.changes = (v.history || []).filter(function (h) { return h && h.version && newerVersion(h.version, app.version); });
       state.newVersion = v;
       if (state.home) renderSide();
-      if (state.view === 'admin' && state.adminTab === 'notify') renderAdmin();
+      if (state.view === 'admin') renderAdmin();
     }).catch(function () {});
   }
   /** 新しい版の変更点（管理画面に出す） */
@@ -444,7 +525,7 @@
     const d = res.defaults;
     const colorOpts = app.colors.map(function (c) {
       return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="spColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
-        '><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+        '><span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:linear-gradient(160deg,' + c.side + ',' + (c.side2 || c.side) + ');box-shadow:0 0 8px -1px ' + (c.glow || c.side) + '"></span>' + esc(c.name) + '</label>';
     }).join('');
     document.getElementById('list').innerHTML =
       '<div class="composer" style="max-width:760px"><b>はじめての準備（最初に1回だけ）</b>' +
@@ -457,7 +538,7 @@
       '<div class="row"><span class="lbl">先生だけの<br>共有ドライブ</span><input id="spAdmin" style="flex:1" value="' + esc(d.admin) + '"></div>' +
       '<p class="note" style="margin:2px 0 0 5.5em">データのスプレッドシートと、生徒に見せないチャンネルのフォルダを置く、先生だけがメンバーの共有ドライブ。</p>' +
       '<div class="row"><span class="lbl">あなたの<br>表示名</span><input id="spName" value="' + esc(d.ownerName) + '" placeholder="例：山田先生"></div>' +
-      '<p class="note">アプリ名・団体名・色は、あとで「⚙ 管理 → 🔔 通知・ログイン」で変えられます。</p>' +
+      '<p class="note">アプリ名・団体名・色は、あとで「⚙ 管理 → 🎨 アプリの表示」で変えられます。</p>' +
       '<div class="row"><span style="flex:1"></span><button class="btn" id="spBtn" onclick="doSetup()">準備する</button></div></div>';
   }
   function doSetup() {
@@ -524,7 +605,7 @@
     });
     if (me.isAdmin && state.res.app) {
       h += '<div style="padding:8px 16px 0;opacity:.75">版 ' + esc(state.res.app.version) + '</div>';
-      if (state.newVersion) h += '<button class="item" style="color:#ffe08a;font-weight:bold" onclick="go(\'admin\'); adminSet(\'notify\')">🆕 新しい版 ' + esc(state.newVersion.version) + ' があります（変更点を見る）</button>';
+      if (state.newVersion) h += '<button class="item" style="color:#ffe08a;font-weight:bold" onclick="go(\'admin\'); adminSet(\'app\')">🆕 新しい版 ' + esc(state.newVersion.version) + ' があります（変更点を見る）</button>';
     }
     h += '</div>';
     side.innerHTML = h;
@@ -982,6 +1063,7 @@
   function adminSet(tab) {
     state.adminTab = tab; state.editMember = null; state.editChMembers = null; state.newCh = false; state.bulk = null; state.delSel = {};
     if (tab === 'notify') { state.notify = null; state.previewIdx = null; state.showSecret = false; }
+    applyApp(state.res.app); // 色を選んだだけで保存しなかったときは、元の色に戻す
     renderAdmin();
   }
   /** 管理の操作のあとは、チャンネルの一覧なども新しくする */
@@ -996,10 +1078,12 @@
     const list = document.getElementById('list');
     if (!a) { list.innerHTML = '<p class="note">読み込み中…</p>'; loadAdmin(); return; }
     const tab = function (k, label) { return '<button class="' + (state.adminTab === k ? 'on' : '') + '" onclick="adminSet(\'' + k + '\')">' + label + '</button>'; };
-    document.getElementById('tabs').innerHTML = tab('members', '👥 メンバー') + tab('channels', '# チャンネル') + tab('absences', '📝 欠席連絡の一覧') + tab('notify', '🔔 通知・ログイン');
+    document.getElementById('tabs').innerHTML = tab('members', '👥 メンバー') + tab('channels', '# チャンネル') + tab('absences', '📝 欠席連絡の一覧') + tab('notify', '🔔 通知・ログイン') +
+      tab('app', '🎨 アプリの表示' + (state.newVersion ? ' 🆕' : ''));
     if (state.adminTab === 'members') list.innerHTML = membersHtml(a);
     else if (state.adminTab === 'channels') list.innerHTML = channelsHtml(a);
     else if (state.adminTab === 'notify') list.innerHTML = notifyHtml();
+    else if (state.adminTab === 'app') list.innerHTML = newVersionHtml() + appSettingsHtml();
     else list.innerHTML = absencesHtml(a);
   }
 
@@ -1015,15 +1099,15 @@
     if (!app) return '';
     const colors = app.colors.map(function (c) {
       return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="asColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
-        ' onchange="previewColor(this.value)"><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+        ' onchange="previewColor(this.value)"><span style="display:inline-block;width:22px;height:22px;border-radius:6px;background:linear-gradient(160deg,' + c.side + ',' + (c.side2 || c.side) + ');box-shadow:0 0 8px -1px ' + (c.glow || c.side) + '"></span>' + esc(c.name) + '</label>';
     }).join('');
     const links = (app.links || []).slice();
     while (links.length < 3) links.push({ name: '', url: '' });
     const linkRows = links.map(function (l, i) {
-      return '<div class="fbar"><span style="width:4.5em">' + (i ? '' : 'リンク') + '</span><input class="search asLinkName" style="width:140px;border-radius:6px" maxlength="20" placeholder="名前（例：部日誌）" value="' + esc(l.name) + '">' +
+      return '<div class="fbar"><span style="width:4.5em">' + (i ? '' : 'リンク') + '</span><input class="search asLinkName" style="width:140px;border-radius:6px" maxlength="20" placeholder="例：ハコ日誌" value="' + esc(l.name) + '">' +
         '<input class="search asLinkUrl" style="width:340px;max-width:100%;border-radius:6px" placeholder="https://…" value="' + esc(l.url) + '"></div>';
     }).join('');
-    return newVersionHtml() + '<h3 class="fh">🎨 アプリの表示</h3>' +
+    return '<h3 class="fh">🎨 アプリの表示</h3>' +
       '<div class="fbar"><span style="width:4.5em">アプリ名</span><input id="asName" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="30" value="' + esc(app.name) + '"></div>' +
       '<div class="fbar"><span style="width:4.5em">団体名</span><input id="asOrg" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="40" placeholder="なくてもよい" value="' + esc(app.org || '') + '"></div>' +
       '<div class="fbar"><span>色</span><span>' + colors + '</span></div>' +
@@ -1067,8 +1151,7 @@
   function notifyHtml() {
     const n = state.notify;
     if (!n) { loadNotify(); return '<p class="note">読み込み中…</p>'; }
-    let h = appSettingsHtml();
-    h += '<h3 class="fh">🔔 保護者へのメール通知（1日1回まとめて）</h3>';
+    let h = '<h3 class="fh">🔔 保護者へのメール通知（1日1回まとめて）</h3>';
     h += '<div class="fbar"><span>毎日</span><select id="ntHour">' + Array.from({ length: 24 }, function (_, i) {
       return '<option value="' + i + '"' + (i === n.hour ? ' selected' : '') + '>' + i + '時</option>';
     }).join('') + '</select><span>ごろに送る</span>' +

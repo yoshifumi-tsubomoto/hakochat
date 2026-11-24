@@ -1,4 +1,4 @@
-// ハコチャット 配布用（2026/11/24 20:03:33 作成）。Copyright 坪本 吉史 / Apache License 2.0。直接編集せず、新しい版は貼り替えてください。
+// ハコチャット 配布用（2026/11/24 20:23:04 作成）。Copyright 坪本 吉史 / Apache License 2.0。直接編集せず、新しい版は貼り替えてください。
 
 
 const TZ = 'Asia/Tokyo';
@@ -14,16 +14,22 @@ const DEFAULT_APP_NAME = 'ハコチャット';
 const VERSION_URL = 'https://yoshifumi-tsubomoto.github.io/hakochat/version.json';
 
 const THEME_COLORS = [
-  { id: 'navy', name: '紺', side: '#1f3a5f', active: '#2f5a8f' },
-  { id: 'blue', name: '青', side: '#1c4f9c', active: '#2f6cc4' },
-  { id: 'teal', name: '青緑', side: '#0f5c63', active: '#1d7f88' },
-  { id: 'green', name: '緑', side: '#25573a', active: '#367a53' },
-  { id: 'olive', name: '若草', side: '#4a5a1c', active: '#66792b' },
-  { id: 'brown', name: '茶', side: '#5c3d24', active: '#7d5636' },
-  { id: 'orange', name: '橙', side: '#8a4316', active: '#ad5a24' },
-  { id: 'red', name: '赤', side: '#7d2232', active: '#a03246' },
-  { id: 'purple', name: '紫', side: '#4b3478', active: '#664a9c' },
-  { id: 'gray', name: '灰', side: '#3a4048', active: '#565e69' }
+  { id: 'navy', name: '紺', side: '#0f2550', side2: '#2b5cb8', accent: '#2563c9', glow: '#5b9dff', active: '#2f5a8f' },
+  { id: 'blue', name: '青', side: '#0b3d91', side2: '#1e88e5', accent: '#1a73e8', glow: '#4fc3f7', active: '#2f6cc4' },
+  { id: 'teal', name: '青緑', side: '#064e4a', side2: '#0ea5a0', accent: '#0e8c7e', glow: '#2dd4bf', active: '#1d7f88' },
+  { id: 'green', name: '緑', side: '#0f4d2c', side2: '#22a35a', accent: '#16a34a', glow: '#4ade80', active: '#367a53' },
+  { id: 'olive', name: '若草', side: '#3a5a12', side2: '#7cb518', accent: '#5f8f12', glow: '#a3e635', active: '#66792b' },
+  { id: 'brown', name: '琥珀', side: '#6b3a0a', side2: '#d4880f', accent: '#b45309', glow: '#fbbf24', active: '#7d5636' },
+  { id: 'orange', name: '橙', side: '#7a2a0c', side2: '#f0652a', accent: '#ea580c', glow: '#fb923c', active: '#ad5a24' },
+  { id: 'red', name: '紅', side: '#6d1235', side2: '#e0457b', accent: '#db2777', glow: '#f472b6', active: '#a03246' },
+  { id: 'pink', name: 'ピンク', side: '#9d174d', side2: '#f06ab0', accent: '#d6336c', glow: '#f9a8d4', active: '#c2185b' },
+  { id: 'purple', name: '紫', side: '#3b1c7a', side2: '#7c4dff', accent: '#7c3aed', glow: '#c084fc', active: '#664a9c' },
+  { id: 'gray', name: '夜空', side: '#0f172a', side2: '#4338ca', accent: '#4f46e5', glow: '#818cf8', active: '#565e69' },
+
+  { id: 'plain-navy', name: '紺（落ち着いた）', plain: true, side: '#1f3a5f', active: '#2f5a8f', accent: '#1a73e8' },
+  { id: 'plain-blue', name: '青（落ち着いた）', plain: true, side: '#1c4f9c', active: '#2f6cc4', accent: '#1a73e8' },
+  { id: 'plain-amber', name: 'アンバー（落ち着いた）', plain: true, side: '#7c4a03', active: '#9a5d07', accent: '#b45309' },
+  { id: 'plain-red', name: '赤（落ち着いた）', plain: true, side: '#7a1f2b', active: '#9a2a38', accent: '#b91c1c' }
 ];
 
 const ROLE = { TEACHER: '管理者', STUDENT: '生徒', COACH: '指導者', PARENT: '保護者' };

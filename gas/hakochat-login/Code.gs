@@ -1,4 +1,4 @@
-// ハコチャット ログイン用 配布用（2026/11/24 20:03:33 作成）。Copyright 坪本 吉史 / Apache License 2.0。
+// ハコチャット ログイン用 配布用（2026/11/24 20:23:04 作成）。Copyright 坪本 吉史 / Apache License 2.0。
 
 const TOKEN_TTL_SEC = 60 * 60 * 24 * 30; // 30日
 
