@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --side: #1f3a5f; --side-text: #dfe7f2; --side-active: #2f5a8f;
+    --text: #1f2328; --sub: #667085; --line: #e3e6ea; --accent: #1a73e8; --unread: #d93025; --ok: #188038; --ng: #d93025;
+    --new-bg: #fff7e6; --pin: #b26a00; --chip: #eef3fb;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif; background: var(--bg); color: var(--text); font-size: 15px; display: flex; flex-direction: column; }
+  button, select, input, textarea { font: inherit; }
+  button { cursor: pointer; }
+  .devbar { background: #fff3cd; border-bottom: 1px solid #f0d58a; padding: 6px 16px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+  .app { display: flex; flex: 1; min-height: 0; }
+  /* サイドバー */
+  .side { width: 250px; background: var(--side); color: var(--side-text); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+  .side h1 { font-size: 18px; margin: 0; padding: 16px 16px 4px; color: #fff; }
+  .me { padding: 0 16px 12px; font-size: 13px; opacity: .85; }
+  .side .sec { padding: 12px 16px 4px; font-size: 12px; opacity: .7; }
+  .side .item { display: flex; justify-content: space-between; align-items: center; padding: 6px 16px; color: var(--side-text); background: none; border: 0; width: 100%; text-align: left; }
+  .side .item:hover { background: rgba(255,255,255,.08); }
+  .side .item.active { background: var(--side-active); color: #fff; font-weight: bold; }
+  .side .item.has-unread { color: #fff; font-weight: bold; }
+  .badge { background: var(--unread); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: bold; }
+  .tag { font-size: 10px; border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; font-weight: normal; }
+  .t-members { background: #5b6b80; color: #fff; }
+  .t-public { background: #e8a33d; color: #3a2600; }
+  .t-parents { background: #d46a8a; color: #fff; }
+  .side .bottom { margin-top: auto; padding: 8px 16px 16px; font-size: 12px; }
+  .side .bottom a { color: var(--side-text); }
+  /* メイン */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .head { background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .head h2 { font-size: 18px; margin: 0; flex: 1; min-width: 120px; }
+  .env { font-size: 11px; background: #e8a33d; color: #3a2600; border-radius: 4px; padding: 1px 6px; }
+  .menu-btn { display: none; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 10px; }
+  .btn { display: inline-block; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; padding: 6px 12px; text-decoration: none; }
+  .btn.sub { background: #fff; color: var(--accent); }
+  .btn.small { padding: 3px 10px; font-size: 13px; }
+  .btn.sub.danger { color: var(--ng); border-color: var(--ng); }
+  .list { flex: 1; overflow-y: auto; padding: 12px 16px 40px; }
+  .note { color: var(--sub); font-size: 13px; margin: 4px 0 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; max-width: 760px; }
+  .ok { color: var(--ok); font-weight: bold; }
+  .ng { color: var(--ng); font-weight: bold; }
+  /* スレッド */
+  .thread { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .thread.pinned { border-color: #f0c36d; }
+  .thread.has-new { box-shadow: inset 4px 0 0 var(--unread); }
+  .t-top { display: flex; gap: 8px; align-items: center; padding: 8px 14px 0; font-size: 12px; color: var(--sub); flex-wrap: wrap; }
+  .chtag { background: var(--chip); color: var(--side); border-radius: 4px; padding: 1px 6px; }
+  .pintag { color: var(--pin); font-weight: bold; }
+  .post { display: flex; gap: 10px; padding: 8px 14px; }
+  .post.new { background: var(--new-bg); }
+  .post.reply { padding-left: 34px; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .body { flex: 1; min-width: 0; }
+  .name { font-weight: bold; }
+  .role { font-size: 11px; color: var(--sub); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .time { font-size: 12px; color: var(--sub); margin-left: 6px; }
+  .newmark { font-size: 11px; color: #fff; background: var(--unread); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+  .text { white-space: pre-wrap; word-break: break-word; margin-top: 2px; line-height: 1.6; }
+  .text a { color: var(--accent); }
+  .acts { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; position: relative; }
+  .react { border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 1px 9px; font-size: 13px; }
+  .react.on { border-color: var(--accent); background: #e8f0fe; }
+  .readers { margin-left: auto; font-size: 12px; color: var(--sub); background: none; border: 0; padding: 2px 4px; }
+  .readers.clickable { color: var(--accent); text-decoration: underline; }
+  .pop { position: absolute; right: 0; top: 26px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 8px 12px; font-size: 13px; z-index: 5; min-width: 180px; }
+  .pop b { display: block; margin-bottom: 4px; }
+  .fold { margin: 2px 14px 2px 48px; background: none; border: 0; color: var(--accent); font-size: 13px; padding: 4px 0; }
+  .replybox { display: flex; gap: 6px; padding: 8px 14px 12px 48px; }
+  .replybox textarea { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 0; resize: none; line-height: 1.5; }
+  .replybox .btn { align-self: flex-end; }
+  .mini { background: none; border: 0; color: var(--sub); font-size: 12px; padding: 2px 4px; }
+  .mini:hover { color: var(--accent); text-decoration: underline; }
+  .text.deleted { color: var(--sub); font-style: italic; }
+  textarea.edit { width: 100%; min-height: 70px; border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; margin-top: 4px; }
+  .composer { background: var(--panel); border: 2px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .composer textarea { width: 100%; height: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; margin-top: 8px; }
+  .composer .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  body.busy, body.busy button { cursor: progress; }
+  .sending { font-size: 12px; color: var(--sub); }
+  .sending::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* タブ（スレッド／ファイル） */
+  .tabs { background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 16px; display: flex; gap: 4px; }
+  .tabs:empty { display: none; }
+  .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px; color: var(--sub); }
+  .tabs button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: bold; }
+  /* 添付 */
+  .attach-btn { border: 1px solid var(--line); background: #fff; color: var(--side); border-radius: 6px; padding: 0 10px; align-self: flex-end; height: 32px; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+  .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 0 48px; }
+  .composer .chips { padding: 6px 0 0; }
+  .chip { background: var(--chip); color: var(--side); border-radius: 14px; padding: 2px 10px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .chip button { background: none; border: 0; color: var(--sub); padding: 0; font-size: 14px; line-height: 1; }
+  .chip.up { opacity: .6; }
+  .files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .file { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--side); text-decoration: none; max-width: 100%; }
+  .file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thumb { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+  .thumb img { display: block; max-width: 220px; max-height: 160px; }
+  /* ファイルのタブ */
+  .crumb { font-size: 13px; color: var(--sub); margin-bottom: 8px; }
+  .fbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  table.ftable { border-collapse: collapse; width: 100%; background: #fff; font-size: 14px; margin-bottom: 14px; }
+  table.ftable th, table.ftable td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+  table.ftable th { background: #f0f3f7; }
+  table.ftable a { color: var(--text); text-decoration: none; }
+  table.ftable a:hover { color: var(--accent); text-decoration: underline; }
+  h3.fh { font-size: 15px; margin: 14px 0 6px; }
+  /* 管理・欠席連絡・検索 */
+  .search { border: 1px solid var(--line); border-radius: 18px; padding: 5px 12px; width: 190px; }
+  .composer .lbl { width: 5em; color: var(--sub); font-size: 13px; flex-shrink: 0; }
+  .composer input:not([type=checkbox]):not([type=radio]), .composer select { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .composer input#mfName, .composer input#mfEmail, .composer input#ncName { flex: 1; min-width: 200px; }
+  .composer.abs { border-color: #2e7d32; }
+  .btn.abs { background: #2e7d32; border-color: #2e7d32; }
+  .abs-note { background: #e8f5e9; border-radius: 6px; padding: 8px 10px; color: #1b5e20; }
+  .thread.result { cursor: pointer; }
+  .thread.result:hover { border-color: var(--accent); }
+  .thread.flash { box-shadow: 0 0 0 3px #ffd54f; transition: box-shadow .3s; }
+  mark { background: #ffe58f; }
+  .abs-memo { flex: 1; min-height: 54px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+  .abs-private { margin-top: 6px; background: #fdf2f5; border: 1px dashed #d46a8a; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #8a2846; }
+  .abs-private span { white-space: pre-wrap; color: var(--text); }
+  .role-desc { margin: 0; padding: 6px 10px 6px 26px; background: #f6f8fb; border-radius: 6px; font-size: 13px; color: #444; line-height: 1.7; flex: 1; }
+  .t-tools { display: flex; gap: 6px; padding: 0 14px 6px; justify-content: flex-end; }
+  .t-tools button { background: none; border: 0; color: var(--sub); font-size: 12px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #323232; color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 14px; display: none; z-index: 20; max-width: 90%; }
+  /* スマホ */
+  @media (max-width: 760px) {
+    .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 10; transform: translateX(-100%); transition: transform .2s; }
+    .side.open { transform: none; box-shadow: 4px 0 16px rgba(0,0,0,.3); }
+    .menu-btn { display: inline-block; }
+    .list { padding: 10px 8px 40px; }
+    .post.reply { padding-left: 14px; }
+    .fold { margin-left: 14px; }
+    .replybox { padding-left: 14px; }
+    .chips { padding-left: 14px; }
+    .search { width: 100%; order: 5; }
+    table.ftable { font-size: 13px; }
+    .thumb img { max-width: 160px; }
+  }
+</style>
+</head>
+<body data-token="<?= urlToken ?>">
+  <div id="devbar" class="devbar" style="display:none"></div>
+  <div class="app" id="app">
+    <nav class="side" id="side"></nav>
+    <main class="main">
+      <div class="head">
+        <button class="menu-btn" onclick="toggleSide()">≡</button>
+        <h2 id="title">ハコチャット</h2>
+        <span id="envTag"></span>
+        <input class="search" id="searchBox" placeholder="🔍 検索（Enter）" onkeydown="if(event.key==='Enter')doSearch(this.value)">
+        <button class="btn sub small" id="allBtn" style="display:none" onclick="toggleAll()">すべて表示</button>
+        <button class="btn small abs" id="absBtn" style="display:none" onclick="openAbsence()">📝 欠席連絡</button>
+        <button class="btn small" id="newBtn" style="display:none" onclick="openComposer()">＋ 新しいスレッド</button>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="list" id="list"><p class="note">読み込み中…</p></div>
+      <input type="file" id="filePicker" multiple style="display:none">
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+  // ===== ログイン情報（学校外の人のトークン）と、開発用の「表示する人」 =====
+  const store = {
+    get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set: function (k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
+  };
+  const urlToken = document.body.dataset.token || '';
+  if (urlToken) store.set('tsc_token', urlToken);
+  const token = urlToken || store.get('tsc_token');
+  let asId = store.get('tsc_as');
+
+  // ===== 状態 =====
+  // snap：画面を開いた時点の既読日時。折りたたみはこれを基準にする（読んでいる途中で急に閉じないように）
+  // openFolds：スレッドごとの開閉（true＝開いている、'closed'＝閉じている、なし＝全体の設定に従う）
+  // drafts：書きかけの文（新着の確認で画面を描き直しても消えないように）
+  const state = {
+    res: null, home: null, view: 'stream', showAll: false, openFolds: {}, snap: {}, pop: null,
+    composing: false, editing: null, drafts: {}, busy: false, pendingRender: false,
+    tab: 'threads', files: null, attach: {}
+  };
+  const MAX_FILE_BYTES = 20 * 1024 * 1024;
+  // クリップの線画（絵文字の📎はWindowsでは分かりにくい絵になるため）
+  const CLIP_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+  const TYPE_TAG = { members: '限定', public: '保護者も', parents: '保護者のみ' };
+  const POLL_SEC = 30;
+  const READ_DELAY_MS = 1500;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function linkify(s) {
+    return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; });
+  }
+  function shortTime(t) { return t ? t.slice(5, 16).replace('-', '/') : ''; }
+  function color(id) {
+    const c = ['#1f3a5f', '#2e7d32', '#6a1b9a', '#00838f', '#e65100', '#ad1457', '#5d4037', '#283593', '#558b2f'];
+    let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return c[h % c.length];
+  }
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(toast.h); toast.h = setTimeout(function () { t.style.display = 'none'; }, 3000);
+  }
+  function call(fn) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn].apply(null, args);
+    });
+  }
+  function showError(e) {
+    document.getElementById('list').innerHTML = '<div class="card"><span class="ng">エラー</span>：' + esc(e.message || e) + '</div>';
+  }
+
+  /** 書き込みの操作を送る。終わったら画面のデータを入れ替える */
+  function act(fn) {
+    if (state.busy) return Promise.resolve(false);
+    state.busy = true;
+    document.body.classList.add('busy');
+    const args = [fn, token, asId].concat(Array.prototype.slice.call(arguments, 1));
+    // 反応などの記録が残っていれば、それが終わってから送る（戻ってきたデータに反映されるように）
+    const waitAll = Promise.all(Object.keys(chains).map(function (k) { return chains[k]; }));
+    return waitAll.then(function () { return call.apply(null, args); }).then(function (home) {
+      state.home = home;
+      return true;
+    }).catch(function (e) {
+      toast('できませんでした：' + (e.message || e));
+      return false;
+    }).finally(function () {
+      state.busy = false;
+      document.body.classList.remove('busy');
+    });
+  }
+
+  // ===== 読み込み =====
+  function init() {
+    document.getElementById('list').innerHTML = '<p class="note">読み込み中…</p>';
+    call('api_init', token, asId).then(function (res) {
+      state.res = res;
+      state.home = res.home || null;
+      state.ver = res.ver || '';
+      state.view = 'stream';
+      state.drafts = {};
+      takeSnap();
+      applyApp(res.app);
+      renderAll();
+      checkNewVersion();
+    }).catch(showError);
+  }
+
+  // ===== アプリの表示（名前・色）と版 =====
+  function applyApp(app) {
+    if (!app) return;
+    const c = app.colors.filter(function (x) { return x.id === app.color; })[0] || app.colors[0];
+    document.documentElement.style.setProperty('--side', c.side);
+    document.documentElement.style.setProperty('--side-active', c.active);
+    document.title = app.name;
+  }
+  /** 新しい版があるか確かめる（管理者だけ。配布用の版だけ。失敗しても何もしない） */
+  function checkNewVersion() {
+    const app = state.res && state.res.app;
+    const me = state.res && state.res.who && state.res.who.member;
+    if (!app || !app.versionUrl || !me || !me.isAdmin || !window.fetch) return;
+    // version.json の形：{ version, url, history: [{ version, date, notes: [変更点, …] }, …] }
+    fetch(app.versionUrl, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (v) {
+      if (!v || !v.version || !newerVersion(v.version, app.version)) return;
+      // 今の版より新しい版の変更点を、新しい順に集める
+      v.changes = (v.history || []).filter(function (h) { return h && h.version && newerVersion(h.version, app.version); });
+      state.newVersion = v;
+      if (state.home) renderSide();
+      if (state.view === 'admin' && state.adminTab === 'notify') renderAdmin();
+    }).catch(function () {});
+  }
+  /** 新しい版の変更点（管理画面に出す） */
+  function newVersionHtml() {
+    const v = state.newVersion;
+    if (!v) return '';
+    let h = '<div class="card" style="border-color:#e8a33d;background:#fffaf0"><b>🆕 新しい版 ' + esc(v.version) + ' があります</b>（今の版：' + esc(state.res.app.version) + '）';
+    h += (v.changes || []).map(function (c) {
+      return '<div style="margin-top:6px"><b>版 ' + esc(c.version) + '</b>' + (c.date ? '（' + esc(c.date) + '）' : '') +
+        '<ul style="margin:2px 0 0;padding-left:1.4em">' + (c.notes || []).map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
+    }).join('');
+    if (v.url) h += '<p style="margin:8px 0 0"><a class="btn small" href="' + esc(v.url) + '" target="_blank" rel="noopener">更新のしかたを見る</a></p>';
+    return h + '</div>';
+  }
+  function newerVersion(a, b) {
+    const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
+    return false;
+  }
+  function refresh() {
+    if (!state.home || state.busy || state.pendingOps > 0 || document.visibilityState !== 'visible') return;
+    // 前回の版を渡す。だれも書き込んでいなければ「変わっていない」とだけ返ってくるので、何もしない
+    call('api_home', token, asId, state.ver).then(function (home) {
+      if (home.unchanged || state.pendingOps > 0) return;
+      state.home = home; state.ver = home.ver; renderSoon();
+    }).catch(function () {});
+  }
+  setInterval(refresh, POLL_SEC * 1000);
+
+  /** 入力中に描き直すと、入力欄の文字の位置などが失われるので、入力が終わってから描き直す */
+  function renderSoon() {
+    // 管理画面は入力欄が多いので、新着の確認では左の一覧だけを描き直す
+    if (state.view === 'admin') { renderSide(); return; }
+    const a = document.activeElement;
+    if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.tagName === 'SELECT') && document.getElementById('list').contains(a)) {
+      state.pendingRender = true;
+      return;
+    }
+    state.pendingRender = false;
+    renderAll();
+  }
+  // 入力欄から離れても、すぐには描き直さない。
+  // ボタンを押したときは「入力欄から離れる」が先に起きるので、すぐ描き直すとボタンが作り直されて、押したことが無視されてしまう。
+  document.addEventListener('focusout', function () {
+    setTimeout(function () { if (state.pendingRender) renderSoon(); }, 800);
+  });
+
+  function takeSnap() {
+    state.snap = {}; state.openFolds = {}; state.showAll = false; state.pop = null; state.editing = null;
+    if (state.home) state.home.threads.forEach(function (t) { state.snap[t.id] = t.myRead; });
+  }
+
+  // ===== 描画 =====
+  function renderAll() {
+    const res = state.res;
+    document.getElementById('envTag').innerHTML = res.env === 'dev' ? '<span class="env">開発版（ダミーデータ）</span>' : '';
+    renderDevbar(res);
+    if (res.needSetup) { renderSetup(res); return; }
+    if (!res.who.member) { renderNoMember(res); return; }
+    renderSide();
+    renderTabs();
+    setHeadButtons();
+    if (state.view === 'admin') { renderAdmin(); return; }
+    if (state.view === 'search') { renderSearch(); return; }
+    if (state.tab === 'files' && state.view !== 'stream') { renderFiles(); return; }
+    renderThreads();
+    watchUnread();
+  }
+
+  /** 見出しの右側のボタン（画面ごとに出すものが違う） */
+  function setHeadButtons() {
+    const v = state.view, isThreads = v !== 'admin' && v !== 'search' && state.tab !== 'files';
+    const ch = v === 'stream' || v === 'admin' || v === 'search' ? null : chById(v);
+    const role = state.res.who.member.role;
+    const canAbs = ch && ch.purpose === 'absence' && (role === '生徒' || role === '保護者' || state.res.who.member.isAdmin);
+    document.getElementById('allBtn').style.display = isThreads ? '' : 'none';
+    document.getElementById('newBtn').style.display = isThreads && state.home.channels.length ? '' : 'none';
+    document.getElementById('absBtn').style.display = isThreads && canAbs ? '' : 'none';
+    document.getElementById('searchBox').style.display = v === 'admin' ? 'none' : '';
+    if (!canAbs) state.absence = false;
+  }
+
+  function renderTabs() {
+    const el = document.getElementById('tabs');
+    if (state.view === 'stream') { el.innerHTML = ''; return; }
+    el.innerHTML = '<button class="' + (state.tab === 'threads' ? 'on' : '') + '" onclick="setTab(\'threads\')">💬 スレッド</button>' +
+      '<button class="' + (state.tab === 'files' ? 'on' : '') + '" onclick="setTab(\'files\')">📁 ファイル</button>';
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    state.composing = false;
+    if (tab === 'files') { state.files = null; loadFiles(); }
+    renderAll();
+  }
+
+  function loadFiles() {
+    const chId = state.view;
+    call('api_files', token, asId, chId).then(function (f) {
+      if (state.view !== chId || state.tab !== 'files') return;
+      state.files = f;
+      renderAll();
+    }).catch(function (e) { state.files = { error: e.message || String(e) }; renderAll(); });
+  }
+
+  function fileIcon(mime, kind) {
+    if (kind === 'folder') return '📁';
+    if (/^image\//.test(mime)) return '🖼️';
+    if (/pdf/.test(mime)) return '📕';
+    if (/spreadsheet|excel|csv/.test(mime)) return '📊';
+    if (/presentation|powerpoint/.test(mime)) return '📽️';
+    if (/document|word|text/.test(mime)) return '📄';
+    if (/^video\//.test(mime)) return '🎬';
+    return '📎';
+  }
+
+  function renderFiles() {
+    const ch = chById(state.view);
+    document.getElementById('title').textContent = '# ' + ch.name;
+    ['allBtn', 'newBtn'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const f = state.files;
+    const list = document.getElementById('list');
+    if (!f) { list.innerHTML = '<p class="note">フォルダを読み込み中…</p>'; return; }
+    if (f.error) { list.innerHTML = '<div class="card"><span class="ng">エラー</span>：' + esc(f.error) + '</div>'; return; }
+    const row = function (x) {
+      return '<tr><td><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + fileIcon(x.mime, x.kind) + ' ' + esc(x.name) + '</a></td><td>' + shortTime(x.updated) + '</td></tr>';
+    };
+    let h = '<div class="crumb">' + (f.place === 'admin' ? '先生だけの共有ドライブ' : '活動の共有ドライブ') + ' ／ <b>' + esc(f.folderName) + '</b></div>';
+    h += '<div class="fbar"><a class="btn small" href="' + esc(f.folderUrl) + '" target="_blank" rel="noopener">↗ Googleドライブで開く</a>' +
+      '<span class="note" style="margin:0">' + (f.canEdit ? '名前の変更・移動・削除は、Googleドライブで直接できます。' : '見ることができます。') + '</span></div>';
+    h += '<h3 class="fh">フォルダの中身</h3><table class="ftable"><tr><th>名前</th><th>更新</th></tr>' +
+      (f.items.map(row).join('') || '<tr><td colspan="2">まだありません</td></tr>') + '</table>';
+    h += '<h3 class="fh">チャットに添付されたファイル（「チャット添付」フォルダ）</h3><table class="ftable"><tr><th>名前</th><th>更新</th></tr>' +
+      (f.attached.map(row).join('') || '<tr><td colspan="2">まだありません</td></tr>') + '</table>';
+    if (f.permPlan) {
+      h += '<h3 class="fh">🔒 このフォルダの共有（管理者だけに表示）</h3><p class="note">' + esc(f.permPlan.note) + '</p>' +
+        '<table class="ftable"><tr><th>メンバー</th><th>権限</th><th>状態</th></tr>' +
+        (f.permPlan.rows.map(function (r) { return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.role) + '</td><td>' + esc(r.status) + '</td></tr>'; }).join('') ||
+          '<tr><td colspan="3">追加する人はいません</td></tr>') + '</table>' +
+        '<button class="btn sub small" onclick="applyPerms()">すべてのチャンネルの共有を、予定どおりに設定する</button><div id="permLog" class="note"></div>';
+    }
+    list.innerHTML = h;
+  }
+
+  function applyPerms() {
+    document.getElementById('permLog').textContent = '設定しています…';
+    call('api_applyPermissions', token, asId).then(function (log) {
+      state.files = null; loadFiles();
+      toast(log.length ? '共有を設定しました（' + log.length + '件）' : '変更はありませんでした');
+    }).catch(function (e) { toast('できませんでした：' + (e.message || e)); });
+  }
+
+  /** 本番の最初の準備（アプリの所有者だけに出る） */
+  function renderSetup(res) {
+    document.getElementById('side').style.display = 'none';
+    ['allBtn', 'newBtn', 'absBtn', 'searchBox'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const app = res.app;
+    document.getElementById('title').textContent = app.name + ' の準備';
+    const d = res.defaults;
+    const colorOpts = app.colors.map(function (c) {
+      return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="spColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
+        '><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+    }).join('');
+    document.getElementById('list').innerHTML =
+      '<div class="composer" style="max-width:760px"><b>はじめての準備（最初に1回だけ）</b>' +
+      '<p class="note">' + esc(res.owner) + ' で準備します。このアカウントが、アプリの所有者で最初の管理者になります。</p>' +
+      '<div class="row"><span class="lbl">アプリ名</span><input id="spAppName" value="' + esc(app.name) + '" maxlength="30"></div>' +
+      '<div class="row"><span class="lbl">団体名</span><input id="spOrg" value="' + esc(app.org || '') + '" maxlength="40" placeholder="例：〇〇中学校 科学部（なくてもよい）" style="flex:1"></div>' +
+      '<div class="row"><span class="lbl">色</span><span>' + colorOpts + '</span></div>' +
+      '<div class="row"><span class="lbl">活動の<br>共有ドライブ</span><input id="spClub" style="flex:1" value="' + esc(d.club) + '"></div>' +
+      '<p class="note" style="margin:2px 0 0 5.5em">チャンネルにするフォルダ（02 実験班 など）が並んでいる共有ドライブ。URLかIDを入れます。メンバーの生徒が使っている共有ドライブです。</p>' +
+      '<div class="row"><span class="lbl">先生だけの<br>共有ドライブ</span><input id="spAdmin" style="flex:1" value="' + esc(d.admin) + '"></div>' +
+      '<p class="note" style="margin:2px 0 0 5.5em">データのスプレッドシートと、生徒に見せないチャンネルのフォルダを置く、先生だけがメンバーの共有ドライブ。</p>' +
+      '<div class="row"><span class="lbl">あなたの<br>表示名</span><input id="spName" value="' + esc(d.ownerName) + '" placeholder="例：山田先生"></div>' +
+      '<p class="note">アプリ名・団体名・色は、あとで「⚙ 管理 → 🔔 通知・ログイン」で変えられます。</p>' +
+      '<div class="row"><span style="flex:1"></span><button class="btn" id="spBtn" onclick="doSetup()">準備する</button></div></div>';
+  }
+  function doSetup() {
+    const btn = document.getElementById('spBtn');
+    btn.disabled = true; btn.textContent = '準備しています…';
+    const color = document.querySelector('input[name="spColor"]:checked');
+    const settings = { name: document.getElementById('spAppName').value, org: document.getElementById('spOrg').value, color: color ? color.value : '' };
+    call('api_setupProd', token, asId, document.getElementById('spClub').value, document.getElementById('spAdmin').value, document.getElementById('spName').value, settings)
+      .then(function (r) {
+        toast('準備しました。フォルダを ' + r.channels + ' 個見つけました。「⚙ 管理 → # チャンネル」で種類を決めてください');
+        init();
+      })
+      .catch(function (e) { btn.disabled = false; btn.textContent = '準備する'; toast('できませんでした：' + (e.message || e)); });
+  }
+
+  function renderNoMember(res) {
+    document.getElementById('side').style.display = 'none';
+    ['allBtn', 'newBtn', 'absBtn', 'searchBox'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const w = res.who;
+    let h = '<div class="card"><h2 style="font-size:16px;margin:0 0 8px">ようこそ</h2>';
+    if (w.email) {
+      h += '<p><span class="ng">登録されていません</span></p><p>' + esc(w.email) +
+        ' は、まだメンバーとして登録されていません。管理者の先生に、このアドレスを伝えて登録を頼んでください。</p>';
+    } else {
+      h += '<p><span class="ng">未確認</span>' + (w.error ? '：' + esc(w.error) : '') + '</p>';
+      if (res.loginUrl) h += '<p><a class="btn" href="' + esc(res.loginUrl) + '" target="_top">Googleアカウントでログイン（学校外の方）</a></p>';
+      else h += '<p class="note">学校外の方のログインは、まだ準備中です。</p>';
+    }
+    document.getElementById('list').innerHTML = h + '</div>';
+  }
+
+  function unreadOf(t) {
+    return t.posts.filter(function (p) { return !p.deleted && !p.mine && p.createdAt > t.myRead; }).length;
+  }
+
+  function renderSide() {
+    const side = document.getElementById('side');
+    side.style.display = '';
+    const me = state.res.who.member;
+    const unreadBy = {};
+    state.home.threads.forEach(function (t) { unreadBy[t.channelId] = (unreadBy[t.channelId] || 0) + unreadOf(t); });
+    const total = Object.keys(unreadBy).reduce(function (s, k) { return s + unreadBy[k]; }, 0);
+    const item = function (id, label, n, extra) {
+      return '<button class="item ' + (state.view === id ? 'active ' : '') + (n ? 'has-unread' : '') + '" onclick="go(\'' + id + '\')">' +
+        '<span>' + label + (extra || '') + '</span>' + (n ? '<span class="badge">' + n + '</span>' : '') + '</button>';
+    };
+    const app = state.res.app || { name: 'ハコチャット', org: '' };
+    let h = '<h1>' + esc(app.name) + '</h1>' + (app.org ? '<div class="me" style="padding-bottom:2px">' + esc(app.org) + '</div>' : '') + '<div class="me">' + esc(me.name) + '（' + esc(me.role) + (me.isAdmin && me.role !== '管理者' ? '・管理者' : '') + '）</div>';
+    h += item('stream', '🏠 ストリーム', total);
+    h += '<div class="sec">チャンネル</div>';
+    h += state.home.channels.map(function (c) {
+      const tag = TYPE_TAG[c.type] ? '<span class="tag t-' + c.type + '">' + TYPE_TAG[c.type] + '</span>' : '';
+      return item(c.id, '# ' + esc(c.name), unreadBy[c.id] || 0, tag);
+    }).join('');
+    if (!state.home.channels.length) h += '<div class="sec">見られるチャンネルはまだありません</div>';
+    h += '<div class="bottom">';
+    if (me.isAdmin) h += item('admin', '⚙ 管理', 0);
+    else if (me.role === '指導者') h += '<button class="item" onclick="coachNewChannel()">＋ チャンネルを作る</button>';
+    if (me.role === '保護者') h += '<button class="item" onclick="openSettings()">👤 設定（メール：' + (me.notify ? '受け取る' : '止めている') + '）</button>';
+    h += (state.res.dataUrl ? '<a href="' + esc(state.res.dataUrl) + '" target="_blank" style="display:block;padding:8px 16px 0">データのスプレッドシート</a>' : '');
+    // ほかのアプリへのリンク（部日誌アプリなど）。全員に出す
+    ((state.res.app && state.res.app.links) || []).forEach(function (l) {
+      h += '<a href="' + esc(l.url) + '" target="_blank" rel="noopener" class="item" style="text-decoration:none">🔗 ' + esc(l.name) + '</a>';
+    });
+    if (me.isAdmin && state.res.app) {
+      h += '<div style="padding:8px 16px 0;opacity:.75">版 ' + esc(state.res.app.version) + '</div>';
+      if (state.newVersion) h += '<button class="item" style="color:#ffe08a;font-weight:bold" onclick="go(\'admin\'); adminSet(\'notify\')">🆕 新しい版 ' + esc(state.newVersion.version) + ' があります（変更点を見る）</button>';
+    }
+    h += '</div>';
+    side.innerHTML = h;
+  }
+
+  function chById(id) { return state.home.channels.filter(function (c) { return c.id === id; })[0]; }
+
+  function renderThreads() {
+    const ch = state.view === 'stream' ? null : chById(state.view);
+    if (state.view !== 'stream' && !ch) { state.view = 'stream'; return renderThreads(); }
+    document.getElementById('title').textContent = ch ? '# ' + ch.name : '🏠 ストリーム（すべてのチャンネル）';
+    document.getElementById('allBtn').textContent = state.showAll ? '既読を折りたたむ' : 'すべて表示';
+
+    let ths = state.home.threads.slice();
+    if (ch) ths = ths.filter(function (t) { return t.channelId === ch.id; });
+    const rank = function (t) { return t.pinned ? 0 : t.myPin ? 1 : 2; };
+    ths.sort(function (a, b) { return rank(a) - rank(b) || (a.updatedAt < b.updatedAt ? 1 : -1); });
+
+    let h = '';
+    if (state.absence && ch) h += absenceFormHtml(ch);
+    if (state.composing) h += composerHtml(ch);
+    h += '<div class="note">📌＝全員へのピン止め、🔖＝自分のピン。その次に、新しい返信があったスレッドが上に来ます。既読の返信は折りたたまれます。</div>';
+    h += ths.map(threadHtml).join('') || '<div class="note">スレッドはまだありません。「＋ 新しいスレッド」から書き込めます。</div>';
+    document.getElementById('list').innerHTML = h;
+  }
+
+  function composerHtml(ch) {
+    const opts = state.home.channels.map(function (c) {
+      return '<option value="' + c.id + '"' + ((ch ? ch.id : state.drafts._ch) === c.id ? ' selected' : '') + '># ' + esc(c.name) + '</option>';
+    }).join('');
+    return '<div class="composer"><b>新しいスレッド</b>' +
+      '<div class="row"><span>チャンネル：</span><select id="newCh" onchange="changeNewCh(this.value)">' + opts + '</select></div>' +
+      '<textarea id="newText" placeholder="本文を入力（Ctrl＋Enterでも投稿できます）" oninput="state.drafts._new=this.value" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey))newThread()">' + esc(state.drafts._new || '') + '</textarea>' +
+      chipsHtml('_new') +
+      '<div class="row"><button class="attach-btn" title="ファイルを添付" onclick="pickFiles(\'_new\')">' + CLIP_SVG + '<span>ファイルを添付</span></button><span style="flex:1"></span><button class="btn sub small" onclick="state.composing=false; renderThreads()">やめる</button>' +
+      '<button class="btn small" onclick="newThread()">投稿する</button></div></div>';
+  }
+
+  function threadHtml(t) {
+    const ch = chById(t.channelId);
+    const read = state.snap[t.id] || '';
+    const first = t.posts[0], replies = t.posts.slice(1);
+    const wasRead = function (p) { return p.mine || p.deleted || p.createdAt <= read; };
+    const readReplies = replies.filter(wasRead);
+    const unreadReplies = replies.filter(function (p) { return !wasRead(p); });
+    const of = state.openFolds[t.id];
+    const canFold = readReplies.length > 0;
+    const fold = canFold && (of === 'closed' || (!state.showAll && of !== true));
+    const n = unreadOf(t);
+    const me = state.res.who.member;
+
+    let h = '<div class="thread ' + (t.pinned ? 'pinned ' : '') + (n ? 'has-new' : '') + '" data-tid="' + t.id + '"' + (n ? ' data-unread="1"' : '') + '>';
+    h += '<div class="t-top">' + (state.view === 'stream' ? '<span class="chtag"># ' + esc(ch.name) + '</span>' : '') +
+      (t.pinned ? '<span class="pintag">📌 全員にピン止め</span>' : '') +
+      (t.myPin ? '<span class="pintag" style="color:var(--accent)">🔖 自分のピン</span>' : '') +
+      (n ? '<span style="color:var(--unread)">新着 ' + n + '件</span>' : '') + '</div>';
+    h += postHtml(t, first, false);
+    if (fold) {
+      h += '<button class="fold" onclick="setFold(\'' + t.id + '\', true)">▸ 既読の返信 ' + readReplies.length + '件を表示</button>';
+      h += unreadReplies.map(function (p) { return postHtml(t, p, true); }).join('');
+    } else {
+      if (canFold) h += '<button class="fold" onclick="setFold(\'' + t.id + '\', \'closed\')">▾ 既読の返信を折りたたむ</button>';
+      h += replies.map(function (p) { return postHtml(t, p, true); }).join('');
+    }
+    // 新しいスレッドの記録が終わるまでは、返信やピン止めはできない
+    if (t.pending) return h + '</div>';
+    h += chipsHtml(t.id);
+    h += '<div class="replybox"><textarea rows="1" id="rb-' + t.id + '" placeholder="返信を書く…（Ctrl＋Enterでも送信）" ' +
+      'oninput="state.drafts[\'' + t.id + '\']=this.value; grow(this)" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey))reply(\'' + t.id + '\')">' +
+      esc(state.drafts[t.id] || '') + '</textarea><button class="attach-btn" title="ファイルを添付" onclick="pickFiles(\'' + t.id + '\')">' + CLIP_SVG + '<span>添付</span></button>' +
+      '<button class="btn small" onclick="reply(\'' + t.id + '\')">送信</button></div>';
+    h += '<div class="t-tools"><button onclick="toggleMyPin(\'' + t.id + '\')">' + (t.myPin ? '🔖 自分のピンを外す' : '🔖 自分だけピン止め') + '</button>' +
+      (me.isAdmin ? '<button onclick="togglePin(\'' + t.id + '\')">' + (t.pinned ? '📌 全員へのピン止めを外す' : '📌 全員にピン止め') + '</button>' : '') + '</div>';
+    return h + '</div>';
+  }
+
+  function postHtml(t, p, isReply) {
+    const me = state.res.who.member;
+    const head = function (isNew) {
+      return '<div class="avatar" style="background:' + color(p.author.id || p.author.name) + '">' + esc(p.author.name.charAt(0)) + '</div><div class="body">' +
+        '<div><span class="name">' + esc(p.author.name) + '</span>' + (p.author.role ? '<span class="role">' + esc(p.author.role) + '</span>' : '') +
+        '<span class="time">' + shortTime(p.createdAt) + (p.editedAt ? '（編集済み）' : '') + '</span>' + (isNew ? '<span class="newmark">新着</span>' : '') + '</div>';
+    };
+    if (p.deleted) {
+      return '<div class="post ' + (isReply ? 'reply' : '') + '">' + head(false) + '<div class="text deleted">（この投稿は削除されました）</div></div></div>';
+    }
+    const isNew = !p.mine && p.createdAt > t.myRead;
+    let h = '<div class="post ' + (isReply ? 'reply ' : '') + (isNew ? 'new' : '') + '">' + head(isNew);
+    if (state.editing === p.id) {
+      h += '<textarea class="edit" id="ed-' + p.id + '" oninput="state.drafts[\'ed-' + p.id + '\']=this.value">' + esc(state.drafts['ed-' + p.id] != null ? state.drafts['ed-' + p.id] : p.body) + '</textarea>' +
+        '<div class="acts"><button class="btn small" onclick="saveEdit(\'' + p.id + '\')">保存</button><button class="btn sub small" onclick="cancelEdit()">やめる</button></div>';
+      return h + '</div></div>';
+    }
+    if (p.body) h += '<div class="text">' + linkify(p.body) + '</div>';
+    // 先生・指導者へのメモ（サーバーは、先生と指導者にだけ中身を渡している）
+    if (p.abs && p.abs.note) h += '<div class="abs-private">🔒 ' + (p.mine ? 'あなたが書いた先生・指導者へのメモ（ほかの方には見えません）' : '先生・指導者だけに表示') + '：<span>' + esc(p.abs.note) + '</span></div>';
+    if (p.files && p.files.length) {
+      h += '<div class="files">' + p.files.map(function (f) {
+        if (/^image\//.test(f.mime)) {
+          // 写真は小さな見本を出す（表示できないときは、ふつうのファイルの表示に切り替える）
+          return '<a class="thumb" href="' + esc(f.url) + '" target="_blank" rel="noopener" title="' + esc(f.name) + '">' +
+            '<img src="https://drive.google.com/thumbnail?id=' + encodeURIComponent(f.id) + '&sz=w440" alt="' + esc(f.name) + '" onerror="thumbFail(this)"></a>';
+        }
+        return '<a class="file" href="' + esc(f.url) + '" target="_blank" rel="noopener">' + fileIcon(f.mime) + ' <span>' + esc(f.name) + '</span></a>';
+      }).join('') + '</div>';
+    }
+    // 送信中（記録が終わるまで）は、スタンプや編集はまだできない
+    if (p.pending) return h + '<div class="acts"><span class="sending">送信中…</span></div></div></div>';
+    const react = function (k, icon, label) {
+      const r = p.reactions[k];
+      return '<button class="react ' + (r.mine ? 'on' : '') + '" title="' + label + '：' + esc(r.names.join('、') || 'まだいません') + '" onclick="react(\'' + p.id + '\', \'' + k + '\')">' + icon + ' ' + (r.n || '') + '</button>';
+    };
+    h += '<div class="acts">' + react('see', '👀', '見ました') + react('like', '👍', 'いいね') + react('no', '🙅', '反対');
+    if (p.mine) h += '<button class="mini" onclick="startEdit(\'' + p.id + '\')">編集</button>';
+    if (p.mine || me.isAdmin) h += '<button class="mini" onclick="removePost(\'' + p.id + '\')">削除</button>';
+    // 保護者には名前が届かない（GASの通信では「なし」の印が消えることがあるので、名前の一覧があるかどうかで判断する）
+    if (!Array.isArray(p.readers.names)) {
+      h += '<span class="readers">既読 ' + p.readers.n + '人</span>';
+    } else {
+      h += '<button class="readers clickable" onclick="togglePop(\'' + p.id + '\', event)">既読 ' + p.readers.n + '人</button>';
+      if (state.pop === p.id) h += '<div class="pop"><b>読んだ人（' + p.readers.n + '人）</b>' + (p.readers.names.map(esc).join('<br>') || 'まだいません') + '</div>';
+    }
+    return h + '</div></div></div>';
+  }
+
+  function renderDevbar(res) {
+    const bar = document.getElementById('devbar');
+    if (!res.devMembers) { bar.style.display = 'none'; return; }
+    if (bar.dataset.done) return;
+    const opts = ['<option value="">（自分）</option>'].concat(res.devMembers.map(function (m) {
+      return '<option value="' + esc(m.id) + '"' + (m.id === asId ? ' selected' : '') + '>' + esc(m.name) + '（' + esc(m.role) + '）</option>';
+    })).join('');
+    bar.innerHTML = '<b>開発用</b><span>表示する人：</span><select id="asSel">' + opts + '</select><span class="note" style="margin:0">所有者だけに表示されます</span>';
+    bar.style.display = 'flex';
+    bar.dataset.done = '1';
+    document.getElementById('asSel').onchange = function () { asId = this.value; store.set('tsc_as', asId); init(); };
+  }
+
+  // ===== 既読：画面に表示されたスレッドを、少し待ってから既読にする =====
+  let observer = null, readQueue = {}, readTimer = null;
+  function watchUnread() {
+    if (observer) observer.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    const timers = {};
+    // 「よく見えている」＝スレッドの半分以上が見えている、または画面の高さの半分以上をスレッドが占めている
+    // （画面より縦に長いスレッドでも、既読になるように）
+    observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        const id = en.target.dataset.tid;
+        const viewH = (en.rootBounds && en.rootBounds.height) || window.innerHeight;
+        const seen = en.isIntersecting && (en.intersectionRatio >= 0.5 || en.intersectionRect.height >= viewH * 0.5);
+        if (seen) {
+          if (!timers[id]) timers[id] = setTimeout(function () { queueRead(id); }, READ_DELAY_MS);
+        } else {
+          clearTimeout(timers[id]);
+          delete timers[id];
+        }
+      });
+    }, { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] });
+    document.querySelectorAll('.thread[data-unread]').forEach(function (el) { observer.observe(el); });
+  }
+  function queueRead(id) {
+    readQueue[id] = true;
+    clearTimeout(readTimer);
+    readTimer = setTimeout(function () {
+      const ids = Object.keys(readQueue);
+      readQueue = {};
+      if (!ids.length) return;
+      call('api_markRead', token, asId, ids).then(function (r) {
+        state.home.threads.forEach(function (t) { if (ids.indexOf(t.id) >= 0 && r.readAt > t.myRead) t.myRead = r.readAt; });
+        renderSoon();
+      }).catch(function () {});
+    }, 800);
+  }
+
+  // ===== 操作 =====
+  function go(view) {
+    state.view = view;
+    state.tab = 'threads';
+    state.composing = false;
+    state.absence = false;
+    if (view === 'admin') { state.admin = null; state.notify = null; state.previewIdx = null; } // 管理画面は開くたびに読み直す
+    takeSnap();
+    document.getElementById('side').classList.remove('open');
+    renderAll();
+  }
+  function toggleSide() { document.getElementById('side').classList.toggle('open'); }
+  function toggleAll() { state.showAll = !state.showAll; state.openFolds = {}; renderThreads(); watchUnread(); }
+  function setFold(id, v) { state.openFolds[id] = v; renderThreads(); watchUnread(); }
+  function togglePop(id, ev) { ev.stopPropagation(); state.pop = state.pop === id ? null : id; renderThreads(); }
+  document.addEventListener('click', function (e) {
+    if (state.pop && !e.target.closest('.pop, .readers')) { state.pop = null; renderThreads(); }
+  });
+  function grow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 240) + 'px'; }
+
+  function openComposer() {
+    state.composing = !state.composing;
+    renderThreads();
+    if (state.composing) { const el = document.getElementById('newText'); if (el) el.focus(); }
+  }
+  // ===== ファイルの添付：選んだらすぐにアップロードし、投稿するときにまとめて付ける =====
+  function thumbFail(img) {
+    const a = img.parentNode;
+    a.className = 'file';
+    a.innerHTML = '🖼️ <span>' + esc(a.title) + '</span>';
+  }
+  function chipsHtml(key) {
+    const list = state.attach[key] || [];
+    if (!list.length) return '';
+    const done = list.every(function (f) { return !f.uploading; });
+    return '<div class="chips">' + list.map(function (f, i) {
+      return '<span class="chip ' + (f.uploading ? 'up' : '') + '">' + fileIcon(f.mime) + ' ' + esc(f.name) +
+        (f.uploading ? '（アップロード中…）' : '<button title="外す" onclick="removeAttach(\'' + key + '\', ' + i + ')">×</button>') + '</span>';
+    }).join('') + '<span class="note" style="margin:0;align-self:center">' +
+      (done ? '← まだ投稿されていません。「' + (key === '_new' ? '投稿する' : '送信') + '」を押すと、このファイル付きで投稿されます' : 'アップロードが終わるまで待ってください') +
+      '</span></div>';
+  }
+  function channelForKey(key) {
+    if (key === '_new') return document.getElementById('newCh').value;
+    const t = state.home.threads.filter(function (x) { return x.id === key; })[0];
+    return t ? t.channelId : '';
+  }
+  function pickFiles(key) {
+    const input = document.getElementById('filePicker');
+    input.value = '';
+    input.onchange = function () { Array.prototype.forEach.call(input.files, function (f) { uploadFile(key, f); }); };
+    input.click();
+  }
+  function uploadFile(key, file) {
+    if (file.size > MAX_FILE_BYTES) { toast('「' + file.name + '」は大きすぎます（1つ20MBまで）'); return; }
+    const chId = channelForKey(key);
+    if (key === '_new') state.attach._newCh = chId;
+    const list = state.attach[key] = state.attach[key] || [];
+    const item = { name: file.name, mime: file.type, uploading: true };
+    list.push(item);
+    renderAttach(key);
+    const reader = new FileReader();
+    reader.onload = function () {
+      const base64 = String(reader.result).split(',')[1] || '';
+      call('api_upload', token, asId, chId, file.name, file.type, base64).then(function (r) {
+        Object.assign(item, r, { uploading: false });
+        renderAttach(key);
+      }).catch(function (e) {
+        list.splice(list.indexOf(item), 1);
+        renderAttach(key);
+        toast('アップロードできませんでした：' + (e.message || e));
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+  function renderAttach(key) {
+    // 入力中の文字を消さないよう、添付の表示のところだけを描き直す
+    const box = key === '_new' ? document.querySelector('.composer') : document.querySelector('.thread[data-tid="' + key + '"]');
+    if (!box) return;
+    const old = box.querySelector('.chips');
+    const html = chipsHtml(key);
+    if (old) old.outerHTML = html || '<span></span>';
+    else if (html) {
+      const anchor = key === '_new' ? box.querySelector('textarea') : box.querySelector('.replybox');
+      anchor.insertAdjacentHTML(key === '_new' ? 'afterend' : 'beforebegin', html);
+    }
+  }
+  function removeAttach(key, i) {
+    const list = state.attach[key] || [];
+    const f = list.splice(i, 1)[0];
+    renderAttach(key);
+    // 投稿しなかったファイルは、「チャット添付」フォルダに残らないようにゴミ箱へ移す
+    if (f && f.id) call('api_discardUpload', token, asId, channelForKey(key), f.id).catch(function () {});
+  }
+  function changeNewCh(v) {
+    state.drafts._ch = v;
+    if ((state.attach._new || []).length) {
+      const oldCh = state.attach._newCh;
+      state.attach._new.forEach(function (f) { if (f.id && oldCh) call('api_discardUpload', token, asId, oldCh, f.id).catch(function () {}); });
+      state.attach._new = [];
+      renderAttach('_new');
+      toast('チャンネルを変えたので、添付したファイルを外しました。もう一度添付してください');
+    }
+  }
+  function readyFiles(key) {
+    const list = state.attach[key] || [];
+    if (list.some(function (f) { return f.uploading; })) { toast('ファイルのアップロードが終わるまで待ってください'); return null; }
+    return list.map(function (f) { return { id: f.id, name: f.name, mime: f.mime }; });
+  }
+
+  // ===== 投稿と返信：押した瞬間に「送信中…」で表示し、記録は裏で行う =====
+  function localNow() {
+    const d = new Date(), p = function (n, w) { return String(n).padStart(w || 2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3);
+  }
+  function tempPost(text, files) {
+    const me = state.res.who.member;
+    const rx = {}; ['see', 'like', 'no'].forEach(function (k) { rx[k] = { n: 0, mine: false, names: [] }; });
+    return {
+      id: 'tmp_' + Date.now() + Math.random().toString(36).slice(2, 6), pending: true, createdAt: localNow(), body: text, mine: true,
+      author: { id: me.id, name: me.name, role: me.role },
+      files: files.map(function (f) { return { id: f.id, name: f.name, mime: f.mime, url: 'https://drive.google.com/file/d/' + f.id + '/view' }; }),
+      reactions: rx, readers: { n: 0, names: me.role === '保護者' ? null : [], me: false }, abs: null
+    };
+  }
+  /** 裏で記録する（記録の途中は、新着の確認で古いデータに戻らないように休む） */
+  function sendInBackground(fn, args, onOk, onFail) {
+    state.pendingOps = (state.pendingOps || 0) + 1;
+    return call.apply(null, [fn, token, asId].concat(args)).then(onOk).catch(function (e) {
+      onFail();
+      toast('送れませんでした：' + (e.message || e) + '（書いた文は元に戻しました）');
+    }).finally(function () { state.pendingOps--; renderSoon(); });
+  }
+  function newThread() {
+    const text = (document.getElementById('newText').value || '').trim();
+    const chId = document.getElementById('newCh').value;
+    const files = readyFiles('_new');
+    if (!files) return;
+    if (!text && !files.length) { toast('本文を入力するか、ファイルを添付してください'); return; }
+    const p = tempPost(text, files);
+    const t = { id: 'tmp_t' + Date.now(), channelId: chId, pinned: false, myPin: false, updatedAt: p.createdAt, myRead: p.createdAt, posts: [p], pending: true };
+    const saved = { text: state.drafts._new, attach: state.attach._new };
+    state.home.threads.push(t);
+    state.drafts._new = ''; state.attach._new = []; state.composing = false;
+    renderAll();
+    sendInBackground('api_newThread', [chId, text, files], function (r) {
+      t.id = r.threadId; t.pending = false; t.updatedAt = r.createdAt; t.myRead = r.createdAt;
+      p.id = r.postId; p.pending = false; p.createdAt = r.createdAt; p.files = r.files;
+    }, function () {
+      state.home.threads.splice(state.home.threads.indexOf(t), 1);
+      state.drafts._new = saved.text; state.attach._new = saved.attach; state.composing = true;
+      renderAll();
+    });
+  }
+  function reply(tid) {
+    const el = document.getElementById('rb-' + tid);
+    const text = (el.value || '').trim();
+    const files = readyFiles(tid);
+    if (!files) return;
+    if (!text && !files.length) return;
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const p = tempPost(text, files);
+    const saved = { text: state.drafts[tid], attach: state.attach[tid], updatedAt: t.updatedAt };
+    t.posts.push(p);
+    t.updatedAt = p.createdAt;
+    state.drafts[tid] = ''; state.attach[tid] = [];
+    state.openFolds[tid] = true; // 自分の返信が折りたたまれて見えなくならないように、このスレッドは開いておく
+    el.value = ''; el.blur();
+    renderAll();
+    sendInBackground('api_reply', [tid, text, files], function (r) {
+      p.id = r.postId; p.pending = false; p.createdAt = r.createdAt; p.files = r.files;
+      t.updatedAt = r.createdAt; if (r.createdAt > t.myRead) t.myRead = r.createdAt;
+    }, function () {
+      t.posts.splice(t.posts.indexOf(p), 1);
+      t.updatedAt = saved.updatedAt;
+      state.drafts[tid] = saved.text; state.attach[tid] = saved.attach;
+      renderAll();
+    });
+  }
+  // ===== 反応と自分のピン：押した瞬間に画面を変え、記録は裏で行う =====
+  // 同じ反応への記録は1つずつ順番に送る（すばやく何度押しても、最後の状態が記録される）。
+  // 記録の途中は、新着の確認で古いデータに戻らないように、新着の確認を休む。
+  const chains = {};
+  function saveInBackground(key, fn, args, undo) {
+    state.pendingOps = (state.pendingOps || 0) + 1;
+    chains[key] = (chains[key] || Promise.resolve()).then(function () {
+      return call.apply(null, [fn, token, asId].concat(args));
+    }).catch(function (e) {
+      undo();
+      renderThreads();
+      toast('記録できませんでした：' + (e.message || e));
+    }).finally(function () {
+      state.pendingOps--;
+    });
+  }
+  function findPost(pid) {
+    for (const t of state.home.threads) for (const p of t.posts) if (p.id === pid) return p;
+    return null;
+  }
+  function react(pid, kind) {
+    const p = findPost(pid);
+    if (!p) return;
+    const r = p.reactions[kind], myName = state.res.who.member.name;
+    const flip = function () {
+      r.mine = !r.mine;
+      r.n += r.mine ? 1 : -1;
+      r.names = r.mine ? r.names.concat([myName]) : r.names.filter(function (n) { return n !== myName; });
+    };
+    flip();
+    // スタンプを押した人は既読として数える（ほかの人の投稿のとき）
+    if (r.mine && !p.mine && !p.readers.me) {
+      p.readers.me = true;
+      p.readers.n += 1;
+      if (p.readers.names) p.readers.names = p.readers.names.concat([myName]);
+    }
+    renderThreads();
+    saveInBackground('rx:' + pid + ':' + kind, 'api_react', [pid, kind, r.mine], flip);
+  }
+  function toggleMyPin(tid) {
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const flip = function () { t.myPin = !t.myPin; };
+    flip();
+    renderThreads();
+    toast(t.myPin ? '自分だけピン止めしました（ほかの人には見えません）' : '自分のピンを外しました');
+    saveInBackground('pin:' + tid, 'api_setMyPin', [tid, t.myPin], flip);
+  }
+  function togglePin(tid) {
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const flip = function () { t.pinned = !t.pinned; };
+    flip();
+    renderThreads();
+    saveInBackground('gpin:' + tid, 'api_setPin', [tid, t.pinned], flip);
+  }
+  function startEdit(pid) { state.editing = pid; delete state.drafts['ed-' + pid]; renderThreads(); const el = document.getElementById('ed-' + pid); if (el) el.focus(); }
+  function cancelEdit() { state.editing = null; renderThreads(); }
+  function saveEdit(pid) {
+    const text = (document.getElementById('ed-' + pid).value || '').trim();
+    if (!text) { toast('本文を入力してください'); return; }
+    const p = findPost(pid);
+    const old = { body: p.body, editedAt: p.editedAt };
+    p.body = text; p.editedAt = localNow();
+    state.editing = null; delete state.drafts['ed-' + pid];
+    renderAll();
+    sendInBackground('api_editPost', [pid, text], function (r) { p.editedAt = r.editedAt; }, function () {
+      p.body = old.body; p.editedAt = old.editedAt; renderAll();
+    });
+  }
+  function removePost(pid) {
+    if (!confirm('この投稿を削除しますか？（削除したことは、ほかの人にも表示されます）')) return;
+    const p = findPost(pid);
+    p.deleted = true;
+    renderAll();
+    sendInBackground('api_deletePost', [pid], function () { toast('削除しました'); }, function () { p.deleted = false; renderAll(); });
+  }
+
+  init();
+</script>
+  <script>
+  // ===== 管理画面・欠席連絡・検索（app.html の続き） =====
+  const TYPE_NAMES = [['all', '生徒全員'], ['members', '限定メンバー'], ['public', '保護者にも公開'], ['parents', '保護者のみ'], ['off', 'チャンネルにしない']];
+  const ROLES = ['生徒', '指導者', '保護者', '管理者'];
+  // 区分ごとにできること（メンバーの追加・編集のときに表示する）
+  const ROLE_DESC = {
+    '生徒': ['見られるチャンネル：「生徒全員」「保護者にも公開」と、参加している「限定メンバー」のチャンネル', '「保護者のみ」のチャンネルは見られない', '投稿・返信・スタンプ・自分の欠席連絡ができる', '学校のアカウントなら、ログインは自動'],
+    '指導者': ['見られるチャンネル：すべて（先生と同じ）', '投稿・返信・スタンプに加えて、チャンネルを作れる', '学校外の人は、チャンネルのフォルダに「コンテンツ管理者」として自動で追加される', '「アプリの管理者にする」と、メンバーの登録やチャンネルの設定もできる'],
+    '保護者': ['見られるチャンネル：「保護者にも公開」「保護者のみ」だけ', '投稿・返信・スタンプと、子どもの欠席連絡ができる', '既読は人数だけが見える（だれが読んだかは見えない）', 'フォルダは見るだけ（閲覧者）。新しい投稿を1日1回メールで受け取れる'],
+    '管理者': ['見られるチャンネル：すべて', 'メンバーの登録、チャンネルの種類の設定、全員へのピン止め、ほかの人の投稿の削除ができる', '管理者の先生向けの区分']
+  };
+  state.admin = null; state.adminTab = 'members'; state.editMember = null; state.editChMembers = null; state.newCh = false;
+  state.search = null;
+
+  // ----- 管理画面 -----
+  function loadAdmin() {
+    return call('api_admin', token, asId).then(function (a) { state.admin = a; if (state.view === 'admin') renderAll(); })
+      .catch(function (e) { toast('読み込めませんでした：' + (e.message || e)); });
+  }
+  function adminSet(tab) {
+    state.adminTab = tab; state.editMember = null; state.editChMembers = null; state.newCh = false; state.bulk = null; state.delSel = {};
+    if (tab === 'notify') { state.notify = null; state.previewIdx = null; state.showSecret = false; }
+    renderAdmin();
+  }
+  /** 管理の操作のあとは、チャンネルの一覧なども新しくする */
+  function afterAdmin(res) {
+    if (res && res.log && res.log.length) toast('フォルダの共有を更新しました（' + res.log.length + '件）');
+    return Promise.all([loadAdmin(), call('api_home', token, asId).then(function (h) { state.home = h; })]).then(renderAll);
+  }
+
+  function renderAdmin() {
+    document.getElementById('title').textContent = '⚙ 管理';
+    const a = state.admin;
+    const list = document.getElementById('list');
+    if (!a) { list.innerHTML = '<p class="note">読み込み中…</p>'; loadAdmin(); return; }
+    const tab = function (k, label) { return '<button class="' + (state.adminTab === k ? 'on' : '') + '" onclick="adminSet(\'' + k + '\')">' + label + '</button>'; };
+    document.getElementById('tabs').innerHTML = tab('members', '👥 メンバー') + tab('channels', '# チャンネル') + tab('absences', '📝 欠席連絡の一覧') + tab('notify', '🔔 通知・ログイン');
+    if (state.adminTab === 'members') list.innerHTML = membersHtml(a);
+    else if (state.adminTab === 'channels') list.innerHTML = channelsHtml(a);
+    else if (state.adminTab === 'notify') list.innerHTML = notifyHtml();
+    else list.innerHTML = absencesHtml(a);
+  }
+
+  // ----- 通知・ログイン -----
+  state.notify = null; state.login = null; state.showSecret = false;
+  function loadNotify() {
+    call('api_notifyInfo', token, asId).then(function (n) { state.notify = n; renderAdmin(); }).catch(function (e) { toast(e.message || e); });
+    if (state.res.who.isOwner) call('api_loginSettings', token, asId).then(function (l) { state.login = l; renderAdmin(); }).catch(function () {});
+  }
+  // ----- アプリの表示（アプリ名・団体名・色） -----
+  function appSettingsHtml() {
+    const app = state.res.app;
+    if (!app) return '';
+    const colors = app.colors.map(function (c) {
+      return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="asColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
+        ' onchange="previewColor(this.value)"><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+    }).join('');
+    const links = (app.links || []).slice();
+    while (links.length < 3) links.push({ name: '', url: '' });
+    const linkRows = links.map(function (l, i) {
+      return '<div class="fbar"><span style="width:4.5em">' + (i ? '' : 'リンク') + '</span><input class="search asLinkName" style="width:140px;border-radius:6px" maxlength="20" placeholder="名前（例：部日誌）" value="' + esc(l.name) + '">' +
+        '<input class="search asLinkUrl" style="width:340px;max-width:100%;border-radius:6px" placeholder="https://…" value="' + esc(l.url) + '"></div>';
+    }).join('');
+    return newVersionHtml() + '<h3 class="fh">🎨 アプリの表示</h3>' +
+      '<div class="fbar"><span style="width:4.5em">アプリ名</span><input id="asName" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="30" value="' + esc(app.name) + '"></div>' +
+      '<div class="fbar"><span style="width:4.5em">団体名</span><input id="asOrg" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="40" placeholder="なくてもよい" value="' + esc(app.org || '') + '"></div>' +
+      '<div class="fbar"><span>色</span><span>' + colors + '</span></div>' +
+      linkRows + '<div class="fbar"><span style="width:4.5em"></span><button class="btn sub small" onclick="connectNisshi()">📔 ハコ日誌とつなぐ</button>' +
+      '<span class="note" style="margin:0">ハコ日誌のURLを貼るだけで、行き来できるリンクを作ります</span></div>' +
+      '<p class="note" style="margin:0 0 8px">リンクは、左の一覧の下に「🔗 名前」で出ます（全員に見えます）。いっしょに使うアプリのURLを入れて「保存」を押します。</p>' +
+      '<div class="fbar"><button class="btn small" onclick="saveAppSettings()">保存</button><span class="note" style="margin:0">版 ' + esc(app.version) + '</span></div>';
+  }
+  /**
+   * ハコ日誌とつなぐ：ハコ日誌のURLに「戻る」の行き先（このアプリのURLと名前）を付けて、リンクの欄に入れる
+   * ハコ日誌は、URLの back と backLabel を見て、左上に「← （このアプリ）に戻る」を出す
+   */
+  function connectNisshi() {
+    const app = state.res.app;
+    const raw = prompt('ハコ日誌のURLを貼り付けてください。\n（ハコ日誌を公開したときの「ウェブアプリのURL」。https://script.google.com/…/exec の形）');
+    if (raw == null) return;
+    const base = String(raw).trim().split('?')[0];
+    if (!/^https:\/\/script\.google\.com\/[^\s"'<>]+\/exec$/.test(base)) { toast('URLの形が違います。…/exec で終わるURLを貼ってください'); return; }
+    const url = base + '?back=' + encodeURIComponent(app.url || '') + '&backLabel=' + encodeURIComponent(app.name + 'に戻る');
+    const names = document.querySelectorAll('.asLinkName'), urls = document.querySelectorAll('.asLinkUrl');
+    let i = Array.prototype.findIndex.call(names, function (n) { return n.value.trim() === 'ハコ日誌'; });
+    if (i < 0) i = Array.prototype.findIndex.call(names, function (n, k) { return !n.value.trim() && !urls[k].value.trim(); });
+    if (i < 0) { toast('リンクの欄があいていません。使わないリンクを消してから、もう一度押してください'); return; }
+    names[i].value = 'ハコ日誌';
+    urls[i].value = url;
+    toast('リンクの欄に入れました。「保存」を押すと、左の一覧の下に「🔗 ハコ日誌」が出ます');
+  }
+
+  function previewColor(id) { applyApp(Object.assign({}, state.res.app, { color: id })); }
+  function saveAppSettings() {
+    const color = document.querySelector('input[name="asColor"]:checked');
+    const names = document.querySelectorAll('.asLinkName'), urls = document.querySelectorAll('.asLinkUrl');
+    const links = Array.prototype.map.call(names, function (n, i) { return { name: n.value, url: urls[i].value }; });
+    const s = { name: document.getElementById('asName').value, org: document.getElementById('asOrg').value, color: color ? color.value : '', links: links };
+    act0('api_setAppSettings', s).then(function (app) {
+      if (!app) { applyApp(state.res.app); return; }
+      state.res.app = app; applyApp(app); renderSide(); toast('アプリの表示を保存しました');
+    });
+  }
+
+  function notifyHtml() {
+    const n = state.notify;
+    if (!n) { loadNotify(); return '<p class="note">読み込み中…</p>'; }
+    let h = appSettingsHtml();
+    h += '<h3 class="fh">🔔 保護者へのメール通知（1日1回まとめて）</h3>';
+    h += '<div class="fbar"><span>毎日</span><select id="ntHour">' + Array.from({ length: 24 }, function (_, i) {
+      return '<option value="' + i + '"' + (i === n.hour ? ' selected' : '') + '>' + i + '時</option>';
+    }).join('') + '</select><span>ごろに送る</span>' +
+      '<button class="btn small" onclick="setSchedule(document.getElementById(\'ntHour\').value)">' + (n.scheduled ? '時刻を変える' : '毎日の通知を始める') + '</button>' +
+      (n.scheduled ? '<button class="btn sub small" onclick="setSchedule(-1)">通知を止める</button>' : '') +
+      '<span class="note" style="margin:0">' + (n.scheduled ? '✅ 毎日' + n.hour + '時ごろに送ります' : '⏸ まだ始めていません') + '</span></div>';
+    h += '<p class="note">新しい投稿がない日は送りません。先生・指導者へのメモ（欠席連絡）は、メールには載せません。' +
+      (n.lastRun ? '<br>前回：' + esc(n.lastRun) : '') + '</p>';
+    h += '<div class="fbar"><button class="btn sub small" onclick="sendNow()">今すぐ送る（試すとき）</button><span class="note" style="margin:0">毎日の時刻を待たずに、いま送ります</span></div>';
+    h += '<h3 class="fh">次に送る内容（保護者ごと）</h3>';
+    h += '<div class="fbar"><span>見本の送り先</span><input id="testTo" class="search" style="width:300px;border-radius:6px" value="' + esc(n.testTo || '') + '" placeholder="見本を受け取るあなたのメールアドレス">' +
+      '<span class="note" style="margin:0">「見本を送る」で、ここに［見本］のメールを送ります</span></div>';
+    h += '<table class="ftable"><tr><th>保護者</th><th>送り先</th><th>通知</th><th>新しい投稿</th><th></th></tr>' +
+      (n.previews.map(function (p, i) {
+        return '<tr><td>' + esc(p.name) + (p.dummy ? '<br><small class="note">開発用のダミー（実際には送らない）</small>' : '') + '</td><td style="word-break:break-all">' + esc(p.to) + '</td><td>' + (p.notify ? '受け取る' : '止めている') + '</td><td>' + (p.count ? p.count + '件' : '—') + '</td><td>' +
+          (p.count ? '<button class="btn sub small" onclick="state.previewIdx=' + i + '; renderAdmin()">内容を見る</button> <button class="btn sub small" onclick="sendTest(' + i + ')">見本を送る</button>' : '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="5">保護者がまだ登録されていません</td></tr>') + '</table>';
+    if (state.previewIdx != null && n.previews[state.previewIdx] && n.previews[state.previewIdx].count) {
+      const p = n.previews[state.previewIdx];
+      h += '<div class="card" style="max-width:none"><b>件名：</b>' + esc(p.subject) + '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px">' + esc(p.body) + '</pre></div>';
+    }
+    if (state.res.who.isOwner) h += loginSettingsHtml();
+    return h;
+  }
+  function setSchedule(hour) {
+    act0('api_setNotifySchedule', Number(hour)).then(function (n) { if (n) { state.notify = n; toast(Number(hour) < 0 ? '毎日の通知を止めました' : '毎日' + hour + '時ごろに送ります'); renderAdmin(); } });
+  }
+  function sendNow() {
+    if (!confirm('いま、保護者へのお知らせメールを送ります。よろしいですか？')) return;
+    act0('api_sendDigestNow').then(function (log) { if (log) { toast(log.length ? log.join('／') : '送る相手はいませんでした'); state.notify = null; renderAdmin(); } });
+  }
+  function sendTest(i) {
+    const p = state.notify.previews[i];
+    const to = document.getElementById('testTo').value.trim();
+    if (!to) { toast('「見本の送り先」に、あなたのメールアドレスを入れてください'); return; }
+    act0('api_sendTestDigest', p.id, to).then(function (r) { if (r) { state.notify.testTo = r.to; toast('見本を ' + r.to + ' に送りました'); } });
+  }
+
+  function loginSettingsHtml() {
+    const l = state.login;
+    if (!l) return '';
+    let h = '<h3 class="fh">🔑 学校外の人のログイン（アプリの所有者だけに表示）</h3>';
+    h += '<p class="note">学校外の指導者や保護者は、「ログイン用アプリ」でGoogleアカウントを確かめてから、このアプリに入ります。ログイン用アプリには、次の2つを設定してください（スクリプト プロパティ）。</p>';
+    h += '<table class="ftable"><tr><th>プロパティ</th><th>値</th></tr>' +
+      '<tr><td>MAIN_URL</td><td style="word-break:break-all">' + esc(l.appUrl) + '</td></tr>' +
+      '<tr><td>SHARED_SECRET</td><td>' + (state.showSecret ? '<code style="word-break:break-all">' + esc(l.secret) + '</code>' :
+        '<button class="mini" onclick="state.showSecret=true; renderAdmin()">合言葉を表示する</button>') +
+      '<br><small class="note">⚠ 合言葉は、ログイン用アプリの設定に貼り付けるだけにして、チャットやファイルには書かないでください</small></td></tr></table>';
+    h += '<div class="fbar"><span>ログイン用アプリのURL</span><input id="loginUrl" class="search" style="width:420px;border-radius:6px" value="' + esc(l.loginUrl) + '" placeholder="https://script.google.com/macros/s/…/exec">' +
+      '<button class="btn small" onclick="saveLoginUrl()">保存</button><span class="note" style="margin:0">' + (l.loginUrl ? '✅ 設定済み' : '未設定（学校外の人はまだログインできません）') + '</span></div>';
+    return h;
+  }
+  function saveLoginUrl() {
+    act0('api_setLoginUrl', document.getElementById('loginUrl').value).then(function (l) { if (l) { state.login = l; toast('保存しました'); renderAdmin(); } });
+  }
+
+  // ----- 👤 設定（保護者がメールのお知らせを切り替える） -----
+  function openSettings() {
+    const me = state.res.who.member;
+    if (me.role !== '保護者') { toast('いまは、保護者の方のメールのお知らせの設定だけがあります'); return; }
+    const on = !me.notify;
+    if (!confirm(on ? '新しい投稿を、1日1回メールで知らせるようにしますか？' : 'メールでのお知らせを止めますか？（アプリを開けば、いつでも新しい投稿を見られます）')) return;
+    act0('api_setMyNotify', on).then(function (r) { if (r) { me.notify = r.notify; toast(r.notify ? 'メールで知らせるようにしました' : 'メールのお知らせを止めました'); renderAll(); } });
+  }
+
+  function memberName(id) { const m = state.admin.members.filter(function (x) { return x.id === id; })[0]; return m ? m.name : '（不明）'; }
+
+  function membersHtml(a) {
+    let h = '';
+    if (state.editMember) h += memberFormHtml(state.editMember);
+    if (state.bulk) h += bulkHtml(state.bulk);
+    h += '<div class="fbar"><button class="btn small" onclick="editMember(null)">＋ メンバーを追加</button>' +
+      '<button class="btn sub small" onclick="openBulk()">📋 表からまとめて追加</button>' +
+      '<span class="note" style="margin:0">生徒はメールを使えないので、招待のメールは送りません。登録すれば、そのまま使えます。</span></div>';
+    const order = { '管理者': 0, '指導者': 1, '生徒': 2, '保護者': 3 };
+    const ms = a.members.slice().sort(function (x, y) {
+      return (x.status === '停止') - (y.status === '停止') || order[x.role] - order[y.role] || String(y.grade).localeCompare(String(x.grade)) || x.name.localeCompare(y.name, 'ja');
+    });
+    // まとめて削除：左の□で選ぶ（自分と所有者は選べない）
+    const sel = state.delSel || {};
+    const nSel = Object.keys(sel).filter(function (id) { return sel[id]; }).length;
+    const selectable = function (m) { return m.email.toLowerCase() !== a.owner && m.id !== state.res.who.member.id; };
+    if (nSel) h += '<div class="fbar"><b>' + nSel + '人を選んでいます</b><button class="btn sub small danger" onclick="deleteSelected()">選んだ人を名簿から削除</button>' +
+      '<button class="btn sub small" onclick="state.delSel={}; renderAdmin()">選ぶのをやめる</button></div>';
+    h += '<table class="ftable"><tr><th><input type="checkbox" title="全員を選ぶ" onclick="selectAllMembers(this.checked)"' + (nSel && nSel === ms.filter(selectable).length ? ' checked' : '') + '></th><th>表示名</th><th>区分</th><th>学年／子ども</th><th>メールアドレス</th><th>状態</th><th></th></tr>';
+    h += ms.map(function (m) {
+      const extra = m.role === '生徒' ? (m.grade ? m.grade + '年' : '') : m.role === '保護者' ? m.children.map(memberName).join('、') : '';
+      const box = selectable(m) ? '<input type="checkbox"' + (sel[m.id] ? ' checked' : '') + ' onclick="toggleDel(\'' + m.id + '\', this.checked)">' : '';
+      return '<tr style="' + (m.status === '停止' ? 'color:var(--sub)' : '') + (sel[m.id] ? ';background:#fdecea' : '') + '"><td>' + box + '</td><td>' + esc(m.name) + '</td><td>' + esc(m.role) + (m.isAdmin && m.role !== '管理者' ? '（管理者）' : '') +
+        '</td><td>' + esc(extra) + '</td><td>' + esc(m.email) + (m.notifyEmail ? '<br><small class="note">通知の送り先：' + esc(m.notifyEmail) + '</small>' : '') +
+        '</td><td>' + esc(m.status) + (m.notify ? '・通知' : '') +
+        '</td><td><button class="btn sub small" onclick="editMember(\'' + m.id + '\')">編集</button></td></tr>';
+    }).join('') + '</table>';
+    return h;
+  }
+
+  // ----- まとめて削除 -----
+  state.delSel = {};
+  function toggleDel(id, on) { state.delSel[id] = on; renderAdmin(); }
+  function selectAllMembers(on) {
+    state.delSel = {};
+    if (on) state.admin.members.forEach(function (m) {
+      if (m.email.toLowerCase() !== state.admin.owner && m.id !== state.res.who.member.id) state.delSel[m.id] = true;
+    });
+    renderAdmin();
+  }
+  function deleteSelected() {
+    const ids = Object.keys(state.delSel).filter(function (id) { return state.delSel[id]; });
+    const ms = state.admin.members.filter(function (m) { return ids.indexOf(m.id) >= 0; });
+    if (!ms.length) return;
+    const list = ms.slice(0, 10).map(function (m) { return '・' + m.name + '（' + m.role + '）'; }).join('\n') + (ms.length > 10 ? '\n…ほか' + (ms.length - 10) + '人' : '');
+    if (!confirm(ms.length + '人を名簿から削除します。\n\n' + list + '\n\n・名前とメールアドレスが消え、ログインできなくなります\n・フォルダの共有も外れます\n・過去の投稿は「（退会したメンバー）」として残ります\n\n元には戻せません。削除しますか？')) return;
+    let withParents = false;
+    const parents = state.admin.members.filter(function (p) {
+      return p.role === '保護者' && ids.indexOf(p.id) < 0 && p.children.some(function (c) { return ids.indexOf(c) >= 0; });
+    });
+    if (parents.length) {
+      withParents = confirm('選んだ生徒の保護者（' + parents.map(function (p) { return p.name; }).join('、') + '）も、名簿から削除しますか？\n\n［OK］保護者も削除する\n［キャンセル］保護者は残す\n\n※ほかの子どもが残っている保護者は残し、つながりだけを外します。');
+    }
+    act0('api_deleteMembers', ids, withParents).then(function (res) {
+      if (!res) return;
+      state.delSel = {};
+      toast(res.deleted.length + '人を名簿から削除しました');
+      afterAdmin(res);
+    });
+  }
+
+  // ----- 表からまとめて追加 -----
+  // スプレッドシートやExcelの表をコピーして貼り付ける（列の間はタブ）。1行目が見出しなら読み飛ばす
+  const BULK_COLS = ['表示名', 'メールアドレス', '区分', '学年', '子ども', '通知の送り先'];
+  state.bulk = null;
+  function openBulk() {
+    state.editMember = null;
+    state.bulk = { text: '', result: null };
+    renderAdmin();
+    document.getElementById('list').scrollTop = 0;
+  }
+  function parseBulk(text) {
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n').filter(function (l) { return l.trim(); });
+    const rows = lines.map(function (l) { return l.split(l.indexOf('\t') >= 0 ? '\t' : ',').map(function (s) { return s.trim(); }); });
+    if (rows.length && rows[0][0] === '表示名') rows.shift();
+    return rows.map(function (c) { return { name: c[0], email: c[1], role: c[2], grade: c[3], children: c[4], notifyEmail: c[5] }; });
+  }
+  function bulkHtml(b) {
+    let h = '<div class="composer"><b>表からまとめて追加</b>';
+    h += '<p class="note" style="margin:6px 0 0">スプレッドシートやExcelで、次の順に列を並べた表を作り、範囲をコピーして下に貼り付けてください（1行目の見出しはあってもなくてもかまいません）。</p>';
+    h += '<table class="ftable" style="margin-top:6px"><tr>' + BULK_COLS.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr>' +
+      '<tr><td>山田 太郎</td><td>（学校のアドレス）</td><td>生徒</td><td>2</td><td></td><td></td></tr>' +
+      '<tr><td>山田 太郎 母</td><td>（Googleアカウント）</td><td>保護者</td><td></td><td>山田 太郎</td><td>（空でよい）</td></tr>' +
+      '<tr><td>高橋コーチ</td><td>（Googleアカウント）</td><td>指導者</td><td></td><td></td><td></td></tr></table>';
+    h += '<p class="note" style="margin:4px 0 0">区分は「生徒・保護者・指導者・管理者」。学年は生徒だけ。子どもは保護者だけで、生徒の表示名を書きます（2人以上は「、」で区切る）。保護者は、1日1回のメールのお知らせを受け取る設定で登録します。</p>';
+    h += '<textarea id="bulkText" style="height:140px;font-family:monospace" placeholder="ここに貼り付け" oninput="state.bulk.text=this.value; state.bulk.result=null">' + esc(b.text) + '</textarea>';
+    const r = b.result;
+    if (r) {
+      const bad = r.rows.filter(function (x) { return x.errors.length; }).length;
+      h += '<p class="' + (r.ok ? '' : 'ng') + '" style="margin:8px 0 4px">' + (r.ok ? '✅ ' + r.rows.length + '人を登録できます。内容を確かめて「登録する」を押してください。' : '直す必要がある行が' + bad + '行あります。表を直して、もう一度「確かめる」を押してください（まだ登録していません）。') + '</p>';
+      h += '<table class="ftable"><tr><th>行</th><th>表示名</th><th>区分</th><th>学年／子ども</th><th>メールアドレス</th><th>確認</th></tr>' + r.rows.map(function (x) {
+        return '<tr' + (x.errors.length ? ' style="background:#fdecea"' : '') + '><td>' + x.line + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.role) + '</td><td>' + esc(x.grade ? x.grade + '年' : x.children) +
+          '</td><td style="word-break:break-all">' + esc(x.email) + '</td><td>' + (x.errors.length ? '<span class="ng">' + esc(x.errors.join('／')) + '</span>' : 'OK') + '</td></tr>';
+      }).join('') + '</table>';
+    }
+    h += '<div class="row"><span style="flex:1"></span><button class="btn sub small" onclick="state.bulk=null; renderAdmin()">やめる</button>' +
+      '<button class="btn sub small" onclick="checkBulk()">確かめる</button>' +
+      (r && r.ok ? '<button class="btn small" onclick="saveBulk()">登録する（' + r.rows.length + '人）</button>' : '') + '</div></div>';
+    return h;
+  }
+  function checkBulk() {
+    const rows = parseBulk(state.bulk.text);
+    if (!rows.length) { toast('表を貼り付けてください'); return; }
+    act0('api_addMembers', rows, true).then(function (r) { if (r) { state.bulk.result = r; renderAdmin(); } });
+  }
+  function saveBulk() {
+    act0('api_addMembers', parseBulk(state.bulk.text), false).then(function (r) {
+      if (!r) return;
+      if (!r.ok) { state.bulk.result = r; renderAdmin(); toast('登録できない行があります'); return; }
+      state.bulk = null;
+      toast(r.added + '人を登録しました');
+      afterAdmin(r);
+    });
+  }
+
+  function editMember(id) {
+    state.bulk = null;
+    const m = id ? state.admin.members.filter(function (x) { return x.id === id; })[0] : null;
+    state.editMember = m ? JSON.parse(JSON.stringify(m)) : { id: '', email: '', name: '', role: '生徒', grade: '', adminFlag: false, children: [], status: '有効', notify: true };
+    renderAdmin();
+    document.getElementById('list').scrollTop = 0;
+  }
+
+  function memberFormHtml(m) {
+    const isOwner = m.email && m.email.toLowerCase() === state.admin.owner;
+    const students = state.admin.members.filter(function (x) { return x.role === '生徒' && x.status !== '停止'; });
+    const sel = function (id, opts, v, dis) {
+      return '<select id="' + id + '"' + (dis ? ' disabled' : '') + ' onchange="memberFormChange()">' + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+    };
+    let h = '<div class="composer"><b>' + (m.id ? 'メンバーを編集' : 'メンバーを追加') + '</b>';
+    h += '<div class="row"><span class="lbl">表示名</span><input id="mfName" value="' + esc(m.name) + '" placeholder="例：山田 太郎／山田 太郎 母"></div>';
+    h += '<div class="row"><span class="lbl">メール</span><input id="mfEmail" value="' + esc(m.email) + '" placeholder="Googleアカウントのメールアドレス"' + (isOwner ? ' disabled' : '') + '></div>';
+    h += '<div class="row"><span class="lbl">区分</span>' + sel('mfRole', ROLES, m.role, isOwner) + '</div>';
+    h += '<div class="row"><span class="lbl"></span><ul class="role-desc">' + (ROLE_DESC[m.role] || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>';
+    if (m.role === '生徒') h += '<div class="row"><span class="lbl">学年</span>' + sel('mfGrade', ['1', '2', '3'], String(m.grade || '1')) + '年</div>';
+    if (m.role === '指導者') h += '<div class="row"><span class="lbl"></span><label><input type="checkbox" id="mfAdmin"' + (m.adminFlag ? ' checked' : '') + '> アプリの管理者にする（メンバーの登録やチャンネルの設定ができる）</label></div>';
+    if (m.role === '保護者') {
+      h += '<div class="row"><span class="lbl">子ども</span><span>' + (students.map(function (s) {
+        return '<label style="margin-right:10px"><input type="checkbox" class="mfChild" value="' + s.id + '"' + (m.children.indexOf(s.id) >= 0 ? ' checked' : '') + '> ' + esc(s.name) + '</label>';
+      }).join('') || '先に生徒を登録してください') + '</span></div>';
+      h += '<div class="row"><span class="lbl"></span><label><input type="checkbox" id="mfNotify"' + (m.notify ? ' checked' : '') + '> 新しい投稿を、1日1回メールで知らせる</label></div>';
+      h += '<div class="row"><span class="lbl">通知の<br>送り先</span><input id="mfNotifyEmail" value="' + esc(m.notifyEmail || '') + '" placeholder="空ならログインのアドレスに送る（ふだん読んでいるメールが別のとき入力）" style="flex:1;min-width:200px"></div>';
+    }
+    if (m.id && !isOwner) h += '<div class="row"><span class="lbl">状態</span>' + sel('mfStatus', ['有効', '停止'], m.status) + '<span class="note" style="margin:0">停止すると、ログインできなくなり、フォルダの共有も外れます</span></div>';
+    const canDelete = m.id && !isOwner && m.id !== state.res.who.member.id;
+    h += '<div class="row">' + (canDelete ? '<button class="btn sub small danger" onclick="deleteMember()">名簿から削除</button>' : '') +
+      '<span style="flex:1"></span><button class="btn sub small" onclick="state.editMember=null; renderAdmin()">やめる</button><button class="btn small" onclick="saveMember()">保存</button></div></div>';
+    return h;
+  }
+
+  /** 名簿から削除する（卒業・退会のとき）。過去の投稿は残る */
+  function deleteMember() {
+    const m = state.editMember;
+    if (!confirm('「' + m.name + '」を名簿から削除します。\n\n・名前とメールアドレスが消え、ログインできなくなります\n・フォルダの共有も外れます\n・過去の投稿は「（退会したメンバー）」として残ります\n\n元には戻せません。削除しますか？')) return;
+    let withParents = false;
+    if (m.role === '生徒') {
+      const parents = state.admin.members.filter(function (x) { return x.role === '保護者' && x.children.indexOf(m.id) >= 0; });
+      if (parents.length) {
+        withParents = confirm('この生徒の保護者（' + parents.map(function (p) { return p.name; }).join('、') + '）も、名簿から削除しますか？\n\n［OK］保護者も削除する\n［キャンセル］保護者は残す\n\n※ほかの子どもも登録されている保護者は残し、この生徒とのつながりだけを外します。');
+      }
+    }
+    act0('api_deleteMember', m.id, withParents).then(function (res) {
+      if (!res) return;
+      state.editMember = null;
+      toast('名簿から削除しました：' + res.deleted.join('、'));
+      afterAdmin(res);
+    });
+  }
+
+  /** フォームの入力を state.editMember に写す（区分を変えると、出す欄が変わるため） */
+  function readMemberForm() {
+    const m = state.editMember, v = function (id) { const el = document.getElementById(id); return el ? el : null; };
+    m.name = v('mfName').value; m.email = v('mfEmail').value; m.role = v('mfRole').value;
+    if (v('mfGrade')) m.grade = v('mfGrade').value;
+    if (v('mfAdmin')) m.adminFlag = v('mfAdmin').checked;
+    if (v('mfNotify')) m.notify = v('mfNotify').checked;
+    if (v('mfNotifyEmail')) m.notifyEmail = v('mfNotifyEmail').value;
+    if (v('mfStatus')) m.status = v('mfStatus').value;
+    if (document.querySelector('.mfChild')) m.children = Array.prototype.filter.call(document.querySelectorAll('.mfChild'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+  }
+  function memberFormChange() { readMemberForm(); renderAdmin(); }
+  function saveMember() {
+    readMemberForm();
+    const m = state.editMember;
+    if (m.role === '保護者' && !m.children.length && !confirm('子どもが選ばれていません。このまま保存しますか？')) return;
+    act0('api_saveMember', m).then(function (res) { if (!res) return; state.editMember = null; toast('保存しました'); afterAdmin(res); });
+  }
+
+  /** 管理の操作を送る（画面のデータの入れ替えは afterAdmin で行う） */
+  function act0(fn) {
+    const args = [fn, token, asId].concat(Array.prototype.slice.call(arguments, 1));
+    document.body.classList.add('busy');
+    return call.apply(null, args).catch(function (e) { toast('できませんでした：' + (e.message || e)); return null; })
+      .finally(function () { document.body.classList.remove('busy'); });
+  }
+
+  function channelsHtml(a) {
+    let h = '';
+    if (state.newCh) {
+      h += '<div class="composer"><b>新しいチャンネル</b><div class="row"><span class="lbl">フォルダ名</span><input id="ncName" placeholder="例：24 磁石の研究（先頭の番号で並びます）"></div>' +
+        '<div class="row"><span class="lbl">場所</span><select id="ncPlace"><option value="club">活動の共有ドライブ（ふつうはこちら）</option><option value="admin">先生だけの共有ドライブ（隠す必要があるとき・「保護者のみ」にするとき）</option></select></div>' +
+        '<div class="row"><span class="note" style="margin:0">種類は「生徒全員」で始まります。あとで変えられます。</span><span style="flex:1"></span><button class="btn sub small" onclick="state.newCh=false; renderAdmin()">やめる</button><button class="btn small" onclick="createChannel()">作る</button></div></div>';
+    }
+    if (state.editChMembers) h += chMembersFormHtml(state.editChMembers);
+    h += '<div class="fbar"><button class="btn small" onclick="state.newCh=true; renderAdmin()">＋ 新しいチャンネル</button>' +
+      '<button class="btn sub small" onclick="syncNow()">ドライブを読み直す</button>' +
+      '<span class="note" style="margin:0">ドライブのフォルダが、フォルダ名の順に全部並びます。ドライブで新しく作ったフォルダは「チャンネルにしない」で並びます。</span></div>';
+    h += '<table class="ftable"><tr><th>フォルダ</th><th>種類</th><th>見られる人</th><th>欠席連絡用</th></tr>';
+    h += a.channels.map(function (c) {
+      const missing = c.status !== '有効';
+      const who = { all: '先生・指導者・生徒全員', public: '先生・指導者・生徒全員・保護者全員', parents: '先生・指導者・保護者全員（生徒は見られない）', off: '—' }[c.type] ||
+        ('先生・指導者・選んだ生徒（' + c.members.length + '人） <button class="mini" onclick="editChMembers(\'' + c.id + '\')">選ぶ</button>');
+      return '<tr style="' + (c.type === 'off' || missing ? 'color:var(--sub)' : '') + '"><td>📁 ' + esc((c.no ? c.no + ' ' : '') + c.name) +
+        (c.place === 'admin' ? '<br><small>（先生だけの共有ドライブ）</small>' : '') + (missing ? '<br><small class="ng">フォルダが見つかりません（ゴミ箱に入っていませんか）</small><br><button class="btn sub small danger" style="margin-top:4px" onclick="removeChannel(\'' + c.id + '\')">🗑 一覧から消す</button>' : '') +
+        (c.type === 'parents' && c.place !== 'admin' ? '<br><small class="ng">⚠ 活動の共有ドライブにあるので、生徒がドライブからファイルを見られます。先生だけの共有ドライブに新しいチャンネルを作り、こちらは別の種類にしてください</small>' : '') + '</td>' +
+        '<td><select onchange="setChType(\'' + c.id + '\', this)"' + (missing ? ' disabled' : '') + '>' + TYPE_NAMES.map(function (t) {
+          // 「保護者のみ」は、先生だけの共有ドライブのフォルダだけ（活動の共有ドライブのファイルは、生徒がドライブから見られるため）
+          const blocked = t[0] === 'parents' && c.place !== 'admin' && c.type !== 'parents';
+          return '<option value="' + t[0] + '"' + (c.type === t[0] ? ' selected' : '') + (blocked ? ' disabled' : '') + '>' + t[1] + (blocked ? '（先生だけの共有ドライブのみ）' : '') + '</option>';
+        }).join('') + '</select></td><td>' + who + '</td>' +
+        '<td style="text-align:center"><input type="checkbox"' + (c.purpose === 'absence' ? ' checked' : '') + (c.type === 'off' ? ' disabled' : '') + ' onchange="setChPurpose(\'' + c.id + '\', this.checked)"></td></tr>';
+    }).join('') + '</table>';
+    h += '<p class="note">⚠「限定メンバー」「保護者のみ」でも、活動の共有ドライブにあるフォルダのファイルは、生徒（コンテンツ管理者）がドライブから見られます。隠したいファイルを扱うチャンネルは、先生だけの共有ドライブに作ってください。</p>';
+    return h;
+  }
+
+  function setChType(id, el) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    const v = el.value;
+    const forParents = function (t) { return t === 'public' || t === 'parents'; };
+    if (forParents(c.type) && !forParents(v) && !confirm('「' + c.name + '」は、保護者が見られなくなり、フォルダの共有も外れます。よろしいですか？')) { el.value = c.type; return; }
+    if (v === 'parents' && c.place !== 'admin') { alert('「保護者のみ」は、先生だけの共有ドライブのフォルダにしか設定できません。\n活動の共有ドライブのファイルは、生徒がドライブから見られるためです。\n\n「＋ 新しいチャンネル」で、場所を「先生だけの共有ドライブ」にして作ってください。'); el.value = c.type; return; }
+    if (v === 'members' && c.place !== 'admin' && !confirm('「' + c.name + '」のフォルダは活動の共有ドライブにあるので、選んでいない生徒も、ドライブからファイルを見られます。\n生徒どうしで見えても困らないファイルだけなら、このままでかまいません。よろしいですか？')) { el.value = c.type; return; }
+    if (v === 'off' && !confirm('「' + c.name + '」をチャンネルの一覧から外します。スレッドとフォルダは消えずに残り、あとで戻せます。よろしいですか？')) { el.value = c.type; return; }
+    act0('api_setChannelType', id, v).then(function (res) { if (res) { toast('「' + c.name + '」を「' + TYPE_NAMES.filter(function (t) { return t[0] === v; })[0][1] + '」にしました'); afterAdmin(res); } });
+  }
+  function removeChannel(id) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    if (!confirm('「' + c.name + '」を、チャンネルの一覧から消しますか？' + String.fromCharCode(10) + String.fromCharCode(10) + 'フォルダをゴミ箱から戻せば、また使えます。消したあとでフォルダを戻すと、新しいチャンネルとして並びます（前のスレッドはアプリに出なくなります）。')) return;
+    act0('api_removeChannel', id).then(function (res) { if (res) { toast('「' + c.name + '」を一覧から消しました' + (res.threads ? '（スレッド' + res.threads + '件はデータに残ります）' : '')); afterAdmin(res); } });
+  }
+  function setChPurpose(id, on) { act0('api_setChannelPurpose', id, on ? 'absence' : '').then(function (res) { if (res) afterAdmin(res); }); }
+  function editChMembers(id) { state.editChMembers = id; renderAdmin(); document.getElementById('list').scrollTop = 0; }
+  function chMembersFormHtml(id) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    const students = state.admin.members.filter(function (x) { return x.role === '生徒' && x.status !== '停止'; })
+      .sort(function (x, y) { return String(y.grade).localeCompare(String(x.grade)) || x.name.localeCompare(y.name, 'ja'); });
+    return '<div class="composer"><b>「' + esc(c.name) + '」に参加する生徒</b><div class="row">' + students.map(function (s) {
+      return '<label style="margin-right:12px"><input type="checkbox" class="cmChk" value="' + s.id + '"' + (c.members.indexOf(s.id) >= 0 ? ' checked' : '') + '> ' + esc(s.name) + (s.grade ? '（' + s.grade + '年）' : '') + '</label>';
+    }).join('') + '</div><div class="row"><span style="flex:1"></span><button class="btn sub small" onclick="state.editChMembers=null; renderAdmin()">やめる</button>' +
+      '<button class="btn small" onclick="saveChMembers(\'' + id + '\')">保存</button></div></div>';
+  }
+  function saveChMembers(id) {
+    const ids = Array.prototype.filter.call(document.querySelectorAll('.cmChk'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+    act0('api_setChannelMembers', id, ids).then(function (res) { if (res) { state.editChMembers = null; toast('保存しました'); afterAdmin(res); } });
+  }
+  function createChannel() {
+    const name = document.getElementById('ncName').value.trim();
+    if (!name) { toast('フォルダ名を入れてください'); return; }
+    act0('api_newChannel', name, document.getElementById('ncPlace').value).then(function (home) {
+      if (!home) return; state.newCh = false; state.home = home; toast('「' + name + '」を作りました'); afterAdmin();
+    });
+  }
+  function coachNewChannel() {
+    const name = prompt('新しいチャンネルのフォルダ名（例：24 磁石の研究）\n活動の共有ドライブにフォルダを作り、「生徒全員」のチャンネルにします。');
+    if (!name || !name.trim()) return;
+    act0('api_newChannel', name.trim(), 'club').then(function (home) { if (home) { state.home = home; toast('作りました'); renderAll(); } });
+  }
+  function syncNow() { act0('api_syncNow').then(function (a) { if (a) { state.admin = a; toast('ドライブを読み直しました'); renderAll(); } }); }
+
+  function absencesHtml(a) {
+    let h = '<p class="note">欠席連絡のチャンネルで送られた連絡を、日付の順にまとめています（2週間前から）。生徒本人からの分と、保護者からの分の両方です。</p>';
+    h += '<table class="ftable"><tr><th>日付</th><th>生徒</th><th>種類</th><th>送った人</th><th>🔒 先生・指導者へのメモ</th></tr>';
+    h += a.absences.map(function (x) {
+      return '<tr style="' + (x.isPast ? 'color:var(--sub)' : '') + '"><td>' + mdw(x.date) + '</td><td>' + esc(x.student) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.from) + '（' + esc(x.fromRole) + '）</td>' +
+        '<td style="white-space:pre-wrap">' + esc(x.note) + '</td></tr>';
+    }).join('') || '<tr><td colspan="5">まだありません</td></tr>';
+    return h + '</table>';
+  }
+
+  // ----- 欠席連絡 -----
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  function mdw(d) { const x = new Date(d + 'T00:00:00'); return (x.getMonth() + 1) + '/' + x.getDate() + '（' + WD[x.getDay()] + '）'; }
+  function todayStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  // 入力中の欠席連絡（新着の確認で画面を描き直しても消えないように、ここに覚えておく）
+  state.absDraft = null;
+  function openAbsence() {
+    state.absence = !state.absence; state.composing = false;
+    state.absDraft = { who: '', date: todayStr(), kind: '欠席', note: '' };
+    renderThreads();
+  }
+  function absInput(k, v) { if (state.absDraft) state.absDraft[k] = v; }
+  function absenceFormHtml(ch) {
+    const me = state.res.who.member;
+    const d = state.absDraft || { who: '', date: todayStr(), kind: '欠席', note: '' };
+    const opt = function (id, label) { return '<option value="' + id + '"' + (d.who === id ? ' selected' : '') + '>' + label + '</option>'; };
+    const onWho = ' onchange="absInput(\'who\', this.value)"';
+    let who;
+    if (me.role === '保護者') {
+      const kids = me.childrenInfo || [];
+      who = kids.length ? '<select id="absWho"' + onWho + '>' + kids.map(function (k) { return opt(k.id, esc(k.name)); }).join('') + '</select>'
+        : '<span class="ng">お子さんが登録されていません。管理者の先生に伝えてください。</span>';
+    } else if (me.role === '生徒') {
+      who = '<b>' + esc(me.name) + '</b>';
+    } else {
+      // 先生が代わりに登録する
+      const st = state.res.students || [];
+      who = '<select id="absWho"' + onWho + '>' + opt('', '（生徒を選ぶ）') + st.map(function (s) {
+        return opt(s.id, esc(s.name) + (s.grade ? '（' + s.grade + '年）' : ''));
+      }).join('') + '</select><span class="note" style="margin:0 0 0 8px">先生が代わりに登録します（「' + esc(me.name) + 'が登録」と表示されます）</span>';
+    }
+    return '<div class="composer abs"><b>📝 欠席連絡</b>' +
+      '<div class="row"><span class="lbl">だれが</span>' + who + '</div>' +
+      '<div class="row"><span class="lbl">いつ</span><input type="date" id="absDate" value="' + esc(d.date) + '" onchange="absInput(\'date\', this.value)"></div>' +
+      '<div class="row"><span class="lbl">種類</span>' + ['欠席', '遅刻', '早退'].map(function (k) {
+        return '<label style="margin-right:12px"><input type="radio" name="absKind" value="' + k + '"' + (d.kind === k ? ' checked' : '') + ' onchange="absInput(\'kind\', this.value)"> ' + k + '</label>';
+      }).join('') + '</div>' +
+      '<div class="row"><span class="lbl">先生・指導者<br>へのメモ</span><textarea id="absNote" class="abs-memo" maxlength="500" placeholder="（任意）先生と指導者だけに伝えたいこと。理由など" oninput="absInput(\'note\', this.value)">' + esc(d.note) + '</textarea></div>' +
+      '<div class="row"><span class="lbl"></span><span class="note" style="margin:0">「だれが・いつ・種類」は、このチャンネルを見られる人全員に見えます。<br>' +
+      '🔒 メモは<b>先生と指導者だけ</b>に見えます（ほかの保護者や生徒には見えません）。</span></div>' +
+      '<div class="row"><span style="flex:1"></span>' +
+      '<button class="btn sub small" onclick="state.absence=false; renderThreads()">やめる</button><button class="btn small" onclick="sendAbsence(\'' + ch.id + '\')">送信</button></div></div>';
+  }
+  function sendAbsence(chId) {
+    const sel = document.getElementById('absWho');
+    const date = document.getElementById('absDate').value;
+    const kind = document.querySelector('input[name=absKind]:checked').value;
+    if (!date) { toast('日付を選んでください'); return; }
+    if (state.res.who.member.role !== '生徒' && (!sel || !sel.value)) { toast('生徒を選んでください'); return; }
+    const note = (document.getElementById('absNote').value || '').trim();
+    act('api_absence', chId, sel ? sel.value : '', date, kind, note).then(function (ok) {
+      if (!ok) return;
+      state.absence = false; state.absDraft = null;
+      toast('欠席連絡を送りました：' + mdw(date) + ' ' + kind);
+      renderAll();
+    });
+  }
+
+  // ----- 検索 -----
+  function doSearch(q) {
+    q = String(q || '').trim();
+    if (!q) return;
+    state.view = 'search';
+    state.search = { q: q, results: null };
+    renderAll();
+    call('api_search', token, asId, q).then(function (r) {
+      if (!state.search || state.search.q !== q) return;
+      state.search.results = r; renderAll();
+    }).catch(function (e) { toast('検索できませんでした：' + (e.message || e)); });
+  }
+  function renderSearch() {
+    const s = state.search;
+    document.getElementById('title').textContent = '🔍 検索：' + s.q;
+    document.getElementById('tabs').innerHTML = '';
+    const list = document.getElementById('list');
+    if (!s.results) { list.innerHTML = '<p class="note">探しています…</p>'; return; }
+    const words = s.q.split(/\s+/).filter(String);
+    const mark = function (text) {
+      let h = esc(text);
+      words.forEach(function (w) { h = h.split(esc(w)).join('<mark>' + esc(w) + '</mark>'); });
+      return h;
+    };
+    let h = '<p class="note">「' + esc(s.q) + '」を含む投稿：' + s.results.length + '件' + (s.results.length >= 100 ? '（新しい100件まで）' : '') + '。押すと、そのスレッドを開きます。</p>';
+    h += s.results.map(function (r) {
+      const ch = chById(r.channelId);
+      return '<div class="thread result" onclick="openResult(\'' + r.channelId + '\', \'' + r.threadId + '\')"><div class="t-top"><span class="chtag"># ' + esc(ch ? ch.name : '') + '</span>' +
+        '<span>' + esc(r.author) + '・' + shortTime(r.createdAt) + '</span></div><div class="post"><div class="body">' +
+        (r.body ? '<div class="text">' + mark(r.body) + '</div>' : '') +
+        (r.files.length ? '<div class="note" style="margin:4px 0 0">📎 ' + r.files.map(mark).join('、') + '</div>' : '') + '</div></div></div>';
+    }).join('');
+    list.innerHTML = h;
+  }
+  function openResult(chId, tid) {
+    go(chId);
+    state.openFolds[tid] = true; // 探した投稿が折りたたまれて見えなくならないように開く
+    renderThreads(); watchUnread();
+    const el = document.querySelector('.thread[data-tid="' + tid + '"]');
+    if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); setTimeout(function () { el.classList.remove('flash'); }, 2000); }
+  }
+</script>
+</body>
+</html>

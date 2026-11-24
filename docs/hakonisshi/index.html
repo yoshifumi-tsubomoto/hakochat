@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ハコ日誌｜Tsubomoto Lab.</title>
+<meta name="description" content="学校の Google アカウントで動く、部活動の日誌アプリ。部員が予定・やったこと・次にやることを書き、みんなの記録を見られます。">
+<meta property="og:title" content="ハコ日誌｜Tsubomoto Lab.">
+<meta property="og:description" content="今日の予定、やったこと、次にやること。部活動の記録を、学校の Google の中で。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/lab.css">
+</head>
+<body class="hue-teal">
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a href="https://yoshifumi-tsubomoto.github.io/" class="brand" aria-label="Tsubomoto Lab. トップへ">
+      <svg viewBox="0 0 40 40" width="36" height="36" aria-hidden="true">
+        <circle cx="20" cy="20" r="18.5" fill="var(--paper)" stroke="var(--navy)" stroke-width="1.5" />
+        <ellipse cx="20" cy="20" rx="13" ry="5.2" fill="none" stroke="var(--navy)" stroke-width="1.2" transform="rotate(-30 20 20)" />
+        <ellipse cx="20" cy="20" rx="13" ry="5.2" fill="none" stroke="var(--teal)" stroke-width="1.2" transform="rotate(30 20 20)" />
+        <circle cx="20" cy="20" r="3.2" fill="var(--navy)" />
+        <circle cx="31.3" cy="13.5" r="2" fill="var(--teal)" />
+      </svg>
+      <span class="brand-text"><span class="brand-name">Tsubomoto Lab.</span><span class="brand-sub">教室のための、小さなソフトウェア</span></span>
+    </a>
+    <nav class="nav" aria-label="このページの案内">
+      <a href="demo/">体験版</a>
+      <a href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/README.md">手引き</a>
+      <a href="../">ハコチャット</a>
+      <a href="https://github.com/yoshifumi-tsubomoto/hakochat">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="app-hero">
+    <div class="wrap app-hero-inner">
+      <div class="tile big" aria-hidden="true">
+        <span class="tile-num mono">3</span>
+        <span class="tile-sym">Hn</span>
+        <span class="tile-ver mono">v1.0.0</span>
+      </div>
+      <div>
+        <div class="crumb small"><a href="https://yoshifumi-tsubomoto.github.io/#apps">アプリ</a> ／ <a href="../">ハコチャット</a> ／ ハコ日誌</div>
+        <div><span class="chip">中学校</span><span class="chip">部活動</span><span class="chip">探究・班活動</span><span class="chip ghost">Google Apps Script</span></div>
+        <h1>ハコ日誌</h1>
+        <p class="lead">今日の予定、やったこと、次にやること。<br>学校の Google アカウントで動く、部活動の日誌アプリです。部員が自分の欄に書き、みんなの記録を見られます。データは学校のドライブから出ません。</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="demo/">体験版をさわる（ログイン不要）</a>
+          <a class="btn" href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/02-dounyu.md">導入の手引き</a>
+          <a class="btn" href="../">ハコチャットへ</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head"><span class="sec-num">01</span><h2>できること</h2></div>
+      <div class="features">
+        <article class="feature"><span class="feature-no">01</span><h3>日ごとに、みんなの記録</h3><p>活動日ごとに、テーマ（班）別に全員の「予定」「やったこと・振り返り」「次回やること」が並びます。部員が書けるのは自分の欄だけです。</p></article>
+        <article class="feature"><span class="feature-no">02</span><h3>前回の続きから</h3><p>前の活動で書いた「次回やること」が出るので、ボタン1つで今日の予定にできます。</p></article>
+        <article class="feature"><span class="feature-no">03</span><h3>個人・テーマで見返す</h3><p>1人分、1テーマ分の記録を、期間を決めて見返せます。発表やレポートのまとめにも使えます。</p></article>
+        <article class="feature"><span class="feature-no">04</span><h3>締切・目標とタイムライン</h3><p>大会や提出の締切を登録すると「あと○日（活動日あと○日）」と出ます。1年の活動の様子も一目で見られます。</p></article>
+        <article class="feature"><span class="feature-no">05</span><h3>欄ごとのコメント</h3><p>先生や部員が、記録の欄にコメントを付けられます。自分の記録に付くと 🔔 で知らせます。</p></article>
+        <article class="feature"><span class="feature-no">06</span><h3>活動予定表と連動</h3><p>活動予定表（年間予定）の活動日を、1時間ごとに自動で読み込みます。出欠はボタン1回です。</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head"><span class="sec-num">02</span><h2>しくみ</h2></div>
+      <pre class="diagram">GitHub（プログラムを配るだけ）
+   ├─→ A校がコピー → A校の Google アカウントで動く（データは A校のドライブ）
+   └─→ B校がコピー → B校の Google アカウントで動く（データは B校のドライブ）</pre>
+      <ul class="dots">
+        <li>テンプレート（スプレッドシート1つ）を<b>自分の学校の Google アカウントにコピー</b>して使います。作者のサーバーはなく、データが作者に届くことはありません</li>
+        <li>初期設定で、活動予定表（年間予定・祝日・月予定）も作られます。祝日は計算で入ります</li>
+        <li>費用はかかりません。新しい版は、ファイルを貼り替えて更新します（先生の画面でお知らせします）</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head"><span class="sec-num">03</span><h2>使えるもの</h2></div>
+      <table class="spec-table">
+        <tr><th style="width:34%">必要なもの</th><th>説明</th></tr>
+        <tr><td>学校の Google アカウント</td><td>Google Workspace for Education など。先生も部員も同じ学校のアカウント</td></tr>
+        <tr><td>部員の端末</td><td>Chromebook・パソコン（ブラウザで開くだけ）</td></tr>
+        <tr><td>置き場所</td><td>日誌のデータは<b>先生だけの場所</b>（マイドライブか、先生だけの共有ドライブ）。活動予定表は部員と使うフォルダ</td></tr>
+      </table>
+      <p class="note" style="margin-top:1rem">学校で使う前に、管理職や情報担当の先生に確認してください。手引きの「<a href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/06-data.md">データと個人情報</a>」が説明に使えます。</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="section-head"><span class="sec-num">04</span><h2>はじめる</h2></div>
+      <ol class="steps">
+        <li><a href="demo/">体験版</a>で、先生・部員の画面をさわってみる</li>
+        <li><a href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/02-dounyu.md">導入の手引き</a>のとおり、テンプレートをコピーして初期設定・公開する（20分ほど）</li>
+        <li>部員の名簿を入れ、テーマ（班）を作って、部員に URL を知らせる</li>
+      </ol>
+      <p class="muted small" style="margin-top:1rem">手引きを AI（Gemini など）に渡して、1つずつ案内してもらいながら進めることもできます（<a href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/08-ai.md">AI と一緒に導入する</a>）。</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <h2>ハコチャットと使う</h2>
+      <p>ハコ日誌は、部活動・クラブのためのチャット「ハコチャット」の付属のアプリです。両方の画面に、もう片方を開くリンクを置けます。データは別々で、どちらか1つだけでも使えます。</p>
+      <div class="hero-actions"><a class="btn primary" href="../">ハコチャットの紹介と体験版</a></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div>
+      <p class="brand-name">Tsubomoto Lab.</p>
+      <p class="muted small">中学校の理科教師が、授業と校務の「こまった」から作ったアプリを紹介します。</p>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://yoshifumi-tsubomoto.github.io/#apps">アプリの一覧</a></li>
+      <li><a href="https://github.com/yoshifumi-tsubomoto/hakochat/blob/main/hakonisshi/guide/README.md">ハコ日誌の手引き</a></li>
+      <li><a href="https://docs.google.com/forms/d/e/1FAIpQLSd9N9QK0rY9jTGNF2HcpDyVbXDLzyhA-qtZ2tM7VUrqhZBQEg/viewform?usp=pp_url&amp;entry.1742015823=%E3%82%A2%E3%83%97%E3%83%AA%E3%81%AE%E8%A6%81%E6%9C%9B%E3%83%BB%E4%B8%8D%E5%85%B7%E5%90%88&amp;entry.781158365=%E3%83%8F%E3%82%B3%E6%97%A5%E8%AA%8C" target="_blank" rel="noopener">要望・不具合の連絡</a></li>
+      <li><a href="https://github.com/yoshifumi-tsubomoto/hakochat" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+  </div>
+  <div class="wrap mono tiny muted footer-note">Copyright 2026 坪本 吉史 ／ Apache License 2.0</div>
+</footer>
+
+</body>
+</html>

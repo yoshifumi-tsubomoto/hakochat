@@ -1,0 +1,3385 @@
+<!DOCTYPE html>
+<html lang="ja">
+<!-- ハコチャット 体験版。Copyright 2026 Yoshifumi Tsubomoto / Apache License 2.0 -->
+<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:">
+<script>
+(function () {
+  try { localStorage.removeItem('tsc_as'); localStorage.removeItem('tsc_token'); } catch (e) {}
+// 体験版：GASの代わりをブラウザの中で動かす（テスト用の gasmock.js のブラウザ版）。データはメモリの中だけ。通信はしない。
+const DEMO_OWNER = 'teacher@example.com';
+const __props = {}, __cache = {}, __folders = {}, __files = {}, __sheets = {};
+let __idSeq = 0, __lastMs = 0, __triggers = [];
+
+const __iter = (list) => { let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; };
+function __mkFile(name, mime, parent, bytes) {
+  const id = 'D' + (++__idSeq);
+  const f = {
+    _id: id, _name: name, _mime: mime, _parent: parent, _trashed: false, _desc: '',
+    getId: () => id, getName: () => f._name, getMimeType: () => f._mime, isTrashed: () => f._trashed,
+    getUrl: () => 'https://drive.google.com/file/d/' + id + '/view', getLastUpdated: () => new Date(),
+    getParents: () => __iter(f._parent ? [__folders[f._parent]] : []),
+    setDescription: (d) => { f._desc = d; return f; }, getDescription: () => f._desc,
+    setTrashed: (v) => { f._trashed = !!v; }, moveTo: (folder) => { f._parent = folder._id; }
+  };
+  __files[id] = f;
+  return f;
+}
+function __mkFolder(name, parent) {
+  const id = 'F' + (++__idSeq);
+  const f = {
+    _id: id, _name: name, _parent: parent, _trashed: false,
+    getId: () => id, getName: () => f._name, isTrashed: () => f._trashed,
+    getUrl: () => 'https://drive.google.com/drive/folders/' + id, getLastUpdated: () => new Date(),
+    createFolder: (n) => __mkFolder(n, id),
+    createFile: (blob) => __mkFile(blob.name, blob.mime, id, blob.bytes),
+    getFolders: () => __iter(Object.values(__folders).filter((x) => x._parent === id)),
+    getFoldersByName: (n) => __iter(Object.values(__folders).filter((x) => x._parent === id && x._name === n)),
+    getFiles: () => __iter(Object.values(__files).filter((x) => x._parent === id))
+  };
+  __folders[id] = f;
+  return f;
+}
+function __toCell(v) {
+  const s = String(v);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{3}))?)?$/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0), +(m[7] || 0)) : s;
+}
+function __mkSheet(name) {
+  const sh = {
+    _name: name, _data: [], _maxRows: 1000, _maxCols: 26,
+    setName: (n) => { sh._name = n; return sh; },
+    getMaxColumns: () => sh._maxCols, getMaxRows: () => sh._maxRows,
+    deleteColumns: (s, n) => { sh._maxCols -= n; },
+    insertColumnsAfter: (s, n) => { sh._maxCols += n; },
+    getLastRow: () => sh._data.length,
+    setFrozenRows: () => {},
+    appendRow: (row) => { sh._data.push(row.map(__toCell)); },
+    deleteRow: (r) => { sh._data.splice(r - 1, 1); },
+    getRange: (r, c, nr, nc) => {
+      const rg = {
+        _text: false,
+        setNumberFormat: (f) => { rg._text = f === '@'; return rg; },
+        // 中身を消す。本物と同じく、末尾の空の行は最後の行に数えない
+        clearContent: () => { for (let i = 0; i < nr; i++) { const row = sh._data[r - 1 + i]; if (row) for (let j = 0; j < nc; j++) row[c - 1 + j] = ''; } while (sh._data.length && sh._data[sh._data.length - 1].every((v) => v === '' || v === undefined)) sh._data.pop(); return rg; },
+        setValues: (vals) => {
+          vals.forEach((row, i) => {
+            const rr = r - 1 + i;
+            while (sh._data.length <= rr) sh._data.push([]);
+            row.forEach((v, j) => { sh._data[rr][c - 1 + j] = rg._text ? String(v) : __toCell(v); });
+          });
+          return { setFontWeight: () => ({ setBackground: () => ({}) }) };
+        },
+        getValues: () => {
+          const out = [];
+          for (let i = 0; i < nr; i++) {
+            const row = sh._data[r - 1 + i] || [];
+            const o = [];
+            for (let j = 0; j < nc; j++) o.push(row[c - 1 + j] === undefined ? '' : row[c - 1 + j]);
+            out.push(o);
+          }
+          return out;
+        }
+      };
+      return rg;
+    }
+  };
+  return sh;
+}
+function __mkSS(name) {
+  const id = 'S' + (++__idSeq);
+  const ss = {
+    _id: id, _sheets: [__mkSheet('シート1')], getId: () => id, getUrl: () => 'https://docs.google.com/spreadsheets/d/' + id,
+    getSheets: () => ss._sheets, insertSheet: (n) => { const s = __mkSheet(n); ss._sheets.push(s); return s; },
+    getSheetByName: (n) => ss._sheets.find((s) => s._name === n) || null
+  };
+  __sheets[id] = ss;
+  const fl = __mkFile(name, 'application/vnd.google-apps.spreadsheet', null);
+  delete __files[fl._id];
+  __files[id] = Object.assign(fl, { getId: () => id });
+  return ss;
+}
+const __root = __mkFolder('マイドライブ', null);
+const __bytesToB64 = (x) => {
+  const list = typeof x === 'string' ? Array.from(new TextEncoder().encode(x)) : x.map((b) => b & 255);
+  return btoa(String.fromCharCode.apply(null, list)).replace(/\+/g, '-').replace(/\//g, '_');
+};
+const __b64ToBytes = (s) => Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+const PropertiesService = { getScriptProperties: () => ({
+  getProperty: (k) => (k in __props ? __props[k] : null), setProperty: (k, v) => { __props[k] = String(v); },
+  setProperties: (o) => Object.keys(o).forEach((k) => { __props[k] = String(o[k]); }) }) };
+const CacheService = { getScriptCache: () => ({ get: (k) => __cache[k] || null, put: (k, v) => { __cache[k] = v; }, remove: (k) => { delete __cache[k]; } }) };
+const LockService = { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) };
+const Session = { getEffectiveUser: () => ({ getEmail: () => DEMO_OWNER }), getActiveUser: () => ({ getEmail: () => DEMO_OWNER }) };
+const DriveApp = {
+  createFolder: (n) => __root.createFolder(n), getRootFolder: () => __root,
+  getFolderById: (id) => { if (!__folders[id]) throw new Error('フォルダが見つかりません'); return __folders[id]; },
+  getFileById: (id) => __files[id]
+};
+const SpreadsheetApp = { create: (n) => __mkSS(n), openById: (id) => __sheets[id] };
+const Drive = { About: { get: () => ({ user: {} }) }, Permissions: {
+  create: () => ({ id: 'P' + (++__idSeq) }), remove: () => {}
+} };
+// メールは送らない（体験版には送る機能がない）
+const MailApp = { sendEmail: () => {}, getRemainingDailyQuota: () => 1500 };
+const ScriptApp = {
+  getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/DEMO/exec' }),
+  getProjectTriggers: () => __triggers.slice(),
+  deleteTrigger: (t) => { __triggers = __triggers.filter((x) => x !== t); },
+  newTrigger: (fn) => {
+    const t = { fn, getHandlerFunction: () => fn };
+    const b = { timeBased: () => b, atHour: (h) => { t.hour = h; return b; }, everyDays: () => b, inTimezone: () => b, create: () => { __triggers.push(t); return t; } };
+    return b;
+  }
+};
+const HtmlService = {};
+const Logger = { log: () => {} };
+const Utilities = {
+  getUuid: () => 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, () => Math.floor(Math.random() * 16).toString(16)),
+  formatDate: (d, tz, fmt) => {
+    let ms = d.getTime();
+    if (Math.abs(ms - Date.now()) < 1000) { if (ms <= __lastMs) ms = __lastMs + 1; __lastMs = ms; }
+    const x = new Date(ms);
+    const p = (n, w) => String(n).padStart(w || 2, '0');
+    return String(fmt || 'yyyy-MM-dd HH:mm:ss')
+      .replace('yyyy', x.getFullYear()).replace('MM', p(x.getMonth() + 1)).replace('dd', p(x.getDate()))
+      .replace('HH', p(x.getHours())).replace('mm', p(x.getMinutes())).replace('ss', p(x.getSeconds()))
+      .replace('SSS', p(x.getMilliseconds(), 3)).replace('M/d', (x.getMonth() + 1) + '/' + x.getDate());
+  },
+  DigestAlgorithm: { SHA_256: 'sha256' },
+  computeDigest: () => Array.from({ length: 32 }, () => Math.floor(Math.random() * 256)),
+  computeHmacSha256Signature: () => [],
+  base64EncodeWebSafe: __bytesToB64,
+  base64DecodeWebSafe: __b64ToBytes,
+  base64Decode: __b64ToBytes,
+  newBlob: (bytes, mime, name) => ({ bytes, mime, name, getDataAsString: () => new TextDecoder().decode(new Uint8Array(bytes)) }),
+  Charset: { UTF_8: 'utf8' }
+};
+
+
+const TZ = 'Asia/Tokyo';
+
+const BUILD_TARGET = 'dev';
+
+
+
+const PROD_DEFAULTS = { club: '', admin: '', ownerName: '' };
+
+const APP_VERSION = '1.0.0';
+
+const DEFAULT_APP_NAME = 'ハコチャット';
+
+const VERSION_URL = '';
+
+const THEME_COLORS = [
+  { id: 'navy', name: '紺', side: '#1f3a5f', active: '#2f5a8f' },
+  { id: 'blue', name: '青', side: '#1c4f9c', active: '#2f6cc4' },
+  { id: 'teal', name: '青緑', side: '#0f5c63', active: '#1d7f88' },
+  { id: 'green', name: '緑', side: '#25573a', active: '#367a53' },
+  { id: 'olive', name: '若草', side: '#4a5a1c', active: '#66792b' },
+  { id: 'brown', name: '茶', side: '#5c3d24', active: '#7d5636' },
+  { id: 'orange', name: '橙', side: '#8a4316', active: '#ad5a24' },
+  { id: 'red', name: '赤', side: '#7d2232', active: '#a03246' },
+  { id: 'purple', name: '紫', side: '#4b3478', active: '#664a9c' },
+  { id: 'gray', name: '灰', side: '#3a4048', active: '#565e69' }
+];
+
+const ROLE = { TEACHER: '管理者', STUDENT: '生徒', COACH: '指導者', PARENT: '保護者' };
+
+const SCHEMA = {
+  members: { name: 'メンバー', cols: [
+    ['id', 'ID'], ['email', 'メールアドレス'], ['name', '表示名'], ['role', '区分'], ['grade', '学年'],
+    ['isAdmin', 'アプリの管理者'], ['children', '子ども（生徒ID）'], ['status', '状態'], ['notify', 'メール通知'], ['createdAt', '登録日時'],
+    ['notifiedAt', '最後に通知した日時'], ['notifyEmail', '通知の送り先（空ならログインのアドレス）']
+  ] },
+  channels: { name: 'チャンネル', cols: [
+    ['id', 'ID'], ['folderId', 'フォルダID'], ['no', '番号'], ['name', '名前'], ['type', '種類'],
+    ['place', '置き場所'], ['status', '状態'], ['createdAt', '作成日時'], ['purpose', '用途']
+  ] },
+  channelMembers: { name: 'チャンネルメンバー', cols: [['channelId', 'チャンネルID'], ['memberId', 'メンバーID']] },
+  threads: { name: 'スレッド', cols: [
+    ['id', 'ID'], ['channelId', 'チャンネルID'], ['authorId', '作成者ID'], ['createdAt', '作成日時'], ['updatedAt', '最終更新日時'], ['pinned', '全員へのピン止め']
+  ] },
+  posts: { name: '投稿', cols: [
+    ['id', 'ID'], ['threadId', 'スレッドID'], ['authorId', '投稿者ID'], ['createdAt', '日時'], ['body', '本文'], ['files', '添付（ファイルID）'],
+    ['editedAt', '編集日時'], ['deleted', '削除'], ['absStudentId', '欠席：生徒ID'], ['absDate', '欠席：日付'], ['absKind', '欠席：種類'],
+    ['absNote', '欠席：先生・指導者へのメモ']
+  ] },
+  reads: { name: '既読', cols: [['memberId', 'メンバーID'], ['threadId', 'スレッドID'], ['readAt', '最後に読んだ日時']] },
+  reactions: { name: '反応', cols: [['postId', '投稿ID'], ['memberId', 'メンバーID'], ['kind', '種類'], ['createdAt', '日時']] },
+  myPins: { name: '自分のピン', cols: [['memberId', 'メンバーID'], ['threadId', 'スレッドID'], ['createdAt', '日時']] },
+  drivePerms: { name: 'ドライブ権限', cols: [
+    ['folderId', 'フォルダID'], ['email', 'メールアドレス'], ['role', '権限'], ['permId', '権限ID'], ['memberId', 'メンバーID'], ['addedAt', '追加日時']
+  ] }
+};
+
+function props_() {
+  return PropertiesService.getScriptProperties();
+}
+
+function prop_(key) {
+  return props_().getProperty(key) || '';
+}
+
+function appName_() {
+  return prop_('APP_NAME') || DEFAULT_APP_NAME;
+}
+
+function themeOf_(id) {
+  return THEME_COLORS.filter(function (c) { return c.id === id; })[0] || THEME_COLORS[0];
+}
+
+const MAX_APP_LINKS = 3;
+
+function appLinks_() {
+  try {
+    const list = JSON.parse(prop_('APP_LINKS') || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function appSettings_() {
+  return { name: appName_(), org: prop_('ORG_NAME'), color: themeOf_(prop_('THEME_COLOR')).id, links: appLinks_(), url: appUrl_(), version: APP_VERSION, versionUrl: VERSION_URL, colors: THEME_COLORS };
+}
+
+function saveAppSettings_(s) {
+  const name = String((s && s.name) || '').trim();
+  const org = String((s && s.org) || '').trim();
+  if (name.length > 30) throw new Error('アプリ名は30文字までにしてください');
+  if (org.length > 40) throw new Error('団体名は40文字までにしてください');
+  const links = [];
+  ((s && s.links) || []).forEach(function (l) {
+    const label = String((l && l.name) || '').trim();
+    const url = String((l && l.url) || '').trim();
+    if (!label && !url) return;
+    if (!label) throw new Error('リンクの名前を入れてください');
+    if (label.length > 20) throw new Error('リンクの名前は20文字までにしてください');
+    if (!/^https:\/\/[^\s"'<>]+$/.test(url)) throw new Error('リンクのURLは「https://」で始まる形で入れてください（' + label + '）');
+    links.push({ name: label, url: url });
+  });
+  if (links.length > MAX_APP_LINKS) throw new Error('リンクは' + MAX_APP_LINKS + 'つまでです');
+  const p = props_();
+  p.setProperty('APP_NAME', name);
+  p.setProperty('ORG_NAME', org);
+  p.setProperty('THEME_COLOR', themeOf_(s && s.color).id);
+  if (s && s.links) p.setProperty('APP_LINKS', JSON.stringify(links));
+}
+
+function isDev_() {
+  return prop_('ENV') === 'dev';
+}
+
+let ss__ = null;
+
+function ss_() {
+  if (!ss__) ss__ = SpreadsheetApp.openById(prop_('DATA_SHEET_ID'));
+  return ss__;
+}
+
+function sheet_(key) {
+  return ss_().getSheetByName(SCHEMA[key].name);
+}
+
+/*
+ * 速くするための工夫（読み込みを減らす）
+ *  - memo__：1回の処理の中で、同じ表を何度も読まないように覚えておく
+ *  - めったに変わらない表（メンバー・チャンネル・チャンネルメンバー）は、処理をまたいで CacheService に覚えておく
+ *  - 書き込んだら、その表の覚えを消し、「データの版」を新しくする（新着の確認で「変わったか」を調べるため）
+ *  - 書き込みの最中（withLock_ の中）は、覚えを使わず、必ずシートから読む（ほかの人の書き込みと食い違わないように）
+ */
+const memo__ = {};
+let inLock__ = false;
+const CACHED_TABLES = { members: true, channels: true, channelMembers: true };
+const TABLE_CACHE_SEC = 600;
+
+function copyRows_(rows) {
+  return rows.map(function (o) { return Object.assign({}, o); });
+}
+
+function readAll_(key) {
+  if (!inLock__ && memo__[key]) return copyRows_(memo__[key]);
+  const cache = CACHED_TABLES[key] && !inLock__ ? CacheService.getScriptCache() : null;
+  if (cache) {
+    const hit = cache.get('tbl:' + key);
+    if (hit) { memo__[key] = JSON.parse(hit); return copyRows_(memo__[key]); }
+  }
+  const rows = readSheet_(key);
+  memo__[key] = rows;
+  if (cache) {
+    const json = JSON.stringify(rows);
+    if (json.length < 90000) cache.put('tbl:' + key, json, TABLE_CACHE_SEC); // CacheService は1つ100KBまで
+  }
+  return copyRows_(rows);
+}
+
+function readSheet_(key) {
+  const sh = sheet_(key);
+  const cols = SCHEMA[key].cols;
+  const n = sh.getLastRow() - 1;
+  if (n <= 0) return [];
+  return sh.getRange(2, 1, n, cols.length).getValues().map(function (r, i) {
+    const o = { _row: i + 2 };
+    cols.forEach(function (c, j) { o[c[0]] = cellToString_(r[j]); });
+    return o;
+  });
+}
+
+function invalidate_(key) {
+  delete memo__[key];
+  if (CACHED_TABLES[key]) CacheService.getScriptCache().remove('tbl:' + key);
+  CacheService.getScriptCache().put('dataVer', now_(), 21600);
+}
+
+function dataVersion_() {
+  const cache = CacheService.getScriptCache();
+  let v = cache.get('dataVer');
+  if (!v) { v = now_(); cache.put('dataVer', v, 21600); }
+  return v;
+}
+
+function cellToString_(v) {
+  if (v === null || v === undefined) return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') return Utilities.formatDate(v, TZ, 'yyyy-MM-dd HH:mm:ss.SSS');
+  return String(v);
+}
+
+function toRow_(key, obj) {
+  return SCHEMA[key].cols.map(function (c) {
+    const v = obj[c[0]];
+    return v === null || v === undefined ? '' : String(v);
+  });
+}
+
+
+function writeRows_(sh, row, rows) {
+  sh.getRange(row, 1, rows.length, rows[0].length).setNumberFormat('@').setValues(rows);
+}
+
+function append_(key, obj) {
+  const sh = sheet_(key);
+  writeRows_(sh, sh.getLastRow() + 1, [toRow_(key, obj)]);
+  invalidate_(key);
+}
+
+function appendMany_(key, objs) {
+  if (!objs.length) return;
+  const sh = sheet_(key);
+  writeRows_(sh, sh.getLastRow() + 1, objs.map(function (o) { return toRow_(key, o); }));
+  invalidate_(key);
+}
+
+function updateRow_(key, obj) {
+  writeRows_(sheet_(key), obj._row, [toRow_(key, obj)]);
+  invalidate_(key);
+}
+
+function deleteRow_(key, row) {
+  sheet_(key).deleteRow(row);
+  invalidate_(key);
+}
+
+function deleteRowsWhere_(key, pred) {
+  const rows = readSheet_(key);
+  const keep = rows.filter(function (o) { return !pred(o); });
+  if (keep.length === rows.length) return 0;
+  const sh = sheet_(key);
+  sh.getRange(2, 1, rows.length, SCHEMA[key].cols.length).clearContent();
+  if (keep.length) writeRows_(sh, 2, keep.map(function (o) { return toRow_(key, o); }));
+  invalidate_(key);
+  return rows.length - keep.length;
+}
+
+function newId_(prefix) {
+  return prefix + Utilities.getUuid().replace(/-/g, '').slice(0, 10);
+}
+
+function now_() {
+  return Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss.SSS');
+}
+
+function withLock_(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  Object.keys(memo__).forEach(function (k) { delete memo__[k]; });
+  inLock__ = true;
+  try {
+    return fn();
+  } finally {
+    inLock__ = false;
+    Object.keys(memo__).forEach(function (k) { delete memo__[k]; });
+    lock.releaseLock();
+  }
+}
+
+function doGet(e) {
+  const tpl = HtmlService.createTemplateFromFile('index');
+  tpl.urlToken = (e && e.parameter && e.parameter.t) || '';
+  return tpl.evaluate()
+    .setTitle(appName_())
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function authorizeAll() {
+  DriveApp.getRootFolder();
+  if (prop_('DATA_SHEET_ID')) SpreadsheetApp.openById(prop_('DATA_SHEET_ID'));
+  MailApp.getRemainingDailyQuota();
+  ScriptApp.getProjectTriggers();
+  Drive.About.get({ fields: 'user' });
+  Logger.log('必要な権限は許可されています。今日あと送れるメールの数：' + MailApp.getRemainingDailyQuota());
+}
+
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
+
+function api_init(token, asId) {
+  const created = ensureSetup_();
+  if (created === 'needSetup') {
+
+    return { env: 'prod', needSetup: true, defaults: PROD_DEFAULTS, app: appSettings_(), owner: ownerEmail_(), who: { email: ownerEmail_(), method: 'auto', isOwner: true, member: null } };
+  }
+  ensureSheets_();
+  migrateRoleNames_();
+  migrateDev_();
+  const who = identify_(token, asId);
+  const res = { env: prop_('ENV'), setupJustNow: created, who: who, loginUrl: prop_('LOGIN_URL'), app: appSettings_() };
+  if (who.isOwner && isDev_()) res.devMembers = readAll_('members').map(publicMember_);
+  if (who.member && who.member.isAdmin) {
+    res.dataUrl = ss_().getUrl();
+
+    if (!prop_('APP_URL')) props_().setProperty('APP_URL', ScriptApp.getService().getUrl());
+
+    res.students = readAll_('members').filter(function (m) { return m.role === ROLE.STUDENT && m.status !== '停止'; })
+      .map(function (m) { return { id: m.id, name: m.name, grade: m.grade }; })
+      .sort(function (a, b) { return String(b.grade).localeCompare(String(a.grade)) || a.name.localeCompare(b.name, 'ja'); });
+  }
+  if (who.member) {
+    if (seedDevContentIfEmpty_()) res.seededJustNow = true;
+    else syncChannelsIfStale_();
+    res.ver = dataVersion_(); // 先に版を取ってから読む（読んでいる間に書き込まれても、次の確認で取り直せるように）
+    res.home = buildHome_(who.member);
+  }
+  return res;
+}
+
+function api_home(token, asId, knownVer) {
+  const who = identify_(token, asId);
+  if (!who.member) throw new Error('本人確認ができていません');
+  syncChannelsIfStale_();
+  const ver = dataVersion_();
+  if (knownVer && knownVer === ver) return { unchanged: true, ver: ver };
+  const home = buildHome_(who.member);
+  home.ver = ver;
+  return home;
+}
+
+const REACTION_KINDS = ['see', 'like', 'no'];
+
+function emptyReactions_() {
+  const rx = {};
+  REACTION_KINDS.forEach(function (k) { rx[k] = { n: 0, mine: false, names: [] }; });
+  return rx;
+}
+
+function buildHome_(me) {
+  const members = readAll_('members');
+  const byId = {};
+  members.forEach(function (m) { byId[m.id] = m; });
+  const cmSet = channelMemberSet_();
+  const channels = sortChannels_(readAll_('channels')).filter(function (c) { return canView_(c, me, cmSet); });
+  const chIds = {};
+  channels.forEach(function (c) { chIds[c.id] = c; });
+
+  const threads = readAll_('threads').filter(function (t) { return chIds[t.channelId]; });
+  const tIds = {};
+  threads.forEach(function (t) { tIds[t.id] = t; });
+
+  const reads = {};
+  readAll_('reads').forEach(function (r) {
+    if (!tIds[r.threadId]) return;
+    (reads[r.threadId] = reads[r.threadId] || {})[r.memberId] = r.readAt;
+  });
+  const myPins = {};
+  readAll_('myPins').forEach(function (r) { if (r.memberId === me.id) myPins[r.threadId] = true; });
+
+  const posts = {};
+  readAll_('posts').forEach(function (p) {
+    if (!tIds[p.threadId]) return;
+    (posts[p.threadId] = posts[p.threadId] || []).push(p);
+  });
+  const reactions = {};
+  readAll_('reactions').forEach(function (r) {
+    const byKind = reactions[r.postId] = reactions[r.postId] || {};
+    (byKind[r.kind] = byKind[r.kind] || []).push(r.memberId);
+  });
+
+  const isParent = me.role === ROLE.PARENT;
+  const unread = {};
+  const out = threads.map(function (t) {
+    const ps = (posts[t.id] || []).sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+    const tr = reads[t.id] || {};
+
+    const myRead = tr[me.id] || me.joinedAt || '';
+    ps.forEach(function (p) {
+      if (p.deleted !== '○' && p.authorId !== me.id && p.createdAt > myRead) unread[t.channelId] = (unread[t.channelId] || 0) + 1;
+    });
+    return {
+      id: t.id, channelId: t.channelId, pinned: t.pinned === '○', myPin: !!myPins[t.id],
+      updatedAt: t.updatedAt, myRead: myRead,
+      posts: ps.map(function (p) {
+        const a = byId[p.authorId];
+        const author = a ? { id: a.id, name: a.name, role: a.role } : { id: '', name: '（退会したメンバー）', role: '' };
+        if (p.deleted === '○') {
+
+          return { id: p.id, createdAt: p.createdAt, deleted: true, mine: p.authorId === me.id, author: author, body: '', files: [],
+            reactions: emptyReactions_(), readers: { n: 0, names: isParent ? null : [] }, abs: null };
+        }
+
+        const readerSet = {};
+        Object.keys(tr).forEach(function (mid) { if (tr[mid] >= p.createdAt) readerSet[mid] = true; });
+        REACTION_KINDS.forEach(function (k) { ((reactions[p.id] || {})[k] || []).forEach(function (mid) { readerSet[mid] = true; }); });
+        const readers = Object.keys(readerSet).filter(function (mid) {
+          return mid !== p.authorId && byId[mid] && canView_(chIds[t.channelId], byId[mid], cmSet);
+        });
+        const rx = {};
+        REACTION_KINDS.forEach(function (k) {
+          const ids = (reactions[p.id] || {})[k] || [];
+          rx[k] = { n: ids.length, mine: ids.indexOf(me.id) >= 0, names: ids.map(function (id) { return byId[id] ? byId[id].name : '（退会）'; }) };
+        });
+        return {
+          id: p.id, createdAt: p.createdAt, editedAt: p.editedAt, body: p.body, mine: p.authorId === me.id,
+          author: author,
+          files: parseFiles_(p.files).map(function (f) { return { id: f.id, name: f.name, mime: f.mime, url: fileUrl_(f.id) }; }),
+          reactions: rx,
+          readers: { n: readers.length, names: isParent ? null : readers.map(function (id) { return byId[id].name; }), me: readers.indexOf(me.id) >= 0 },
+
+          abs: p.absDate ? { studentId: p.absStudentId, date: p.absDate, kind: p.absKind,
+            note: canSeeAbsNote_(me) || p.authorId === me.id ? (p.absNote || '') : undefined } : null
+        };
+      })
+    };
+  }).filter(function (t) { return t.posts.some(function (p) { return !p.deleted; }); });
+
+  return {
+    channels: channels.map(function (c) {
+      return { id: c.id, no: c.no, name: c.name, type: c.type, place: c.place, purpose: c.purpose, unread: unread[c.id] || 0 };
+    }),
+    threads: out
+  };
+}
+
+const CHANNEL_TYPES = ['all', 'members', 'public', 'parents', 'off'];
+const SYNC_INTERVAL_SEC = 300;
+
+function parseFolderName_(name) {
+  const m = String(name).match(/^(\d+)\s*(.*)$/);
+  return m ? { no: m[1], name: m[2] || m[1] } : { no: '', name: String(name) };
+}
+
+function syncChannelsIfStale_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get('channelSync')) return;
+  syncChannels_();
+  cache.put('channelSync', '1', SYNC_INTERVAL_SEC);
+}
+
+function syncChannels_() {
+  const found = {};
+  [['club', prop_('CLUB_ROOT_ID')], ['admin', prop_('ADMIN_ROOT_ID')]].forEach(function (pair) {
+    if (!pair[1]) return;
+    const it = DriveApp.getFolderById(pair[1]).getFolders();
+    while (it.hasNext()) {
+      const f = it.next();
+      if (f.isTrashed()) continue;
+      found[f.getId()] = { place: pair[0], fname: f.getName() };
+    }
+  });
+
+  withLock_(function () {
+    const rows = readAll_('channels');
+    const known = {};
+    rows.forEach(function (c) {
+      known[c.folderId] = true;
+      const f = found[c.folderId];
+      if (!f) {
+        if (c.status !== '見つからない') { c.status = '見つからない'; updateRow_('channels', c); }
+        return;
+      }
+      const p = parseFolderName_(f.fname);
+      if (c.name !== p.name || c.no !== p.no || c.place !== f.place || c.status !== '有効') {
+        c.name = p.name; c.no = p.no; c.place = f.place; c.status = '有効';
+        updateRow_('channels', c);
+      }
+    });
+    const t = now_();
+    const added = Object.keys(found).filter(function (id) { return !known[id]; }).map(function (id) {
+      const p = parseFolderName_(found[id].fname);
+      return { id: newId_('c_'), folderId: id, no: p.no, name: p.name, type: 'off', place: found[id].place, status: '有効', createdAt: t };
+    });
+    appendMany_('channels', added);
+  });
+}
+
+function sortChannels_(list) {
+  return list.slice().sort(function (a, b) {
+    return (a.no ? 0 : 1) - (b.no ? 0 : 1) || (a.no + ' ' + a.name).localeCompare(b.no + ' ' + b.name, 'ja');
+  });
+}
+
+function canView_(c, m, cmSet) {
+  if (!m || c.type === 'off' || c.status !== '有効') return false;
+  if (m.role === ROLE.TEACHER || m.role === ROLE.COACH) return true;
+  if (m.role === ROLE.STUDENT) return c.type === 'all' || c.type === 'public' || (c.type === 'members' && cmSet[c.id + '|' + m.id] === true);
+  if (m.role === ROLE.PARENT) return c.type === 'public' || c.type === 'parents';
+  return false;
+}
+
+function channelMemberSet_() {
+  const set = {};
+  readAll_('channelMembers').forEach(function (r) { set[r.channelId + '|' + r.memberId] = true; });
+  return set;
+}
+
+const ATTACH_FOLDER_NAME = 'チャット添付';
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_FILES_PER_POST = 10;
+const UPLOADER_TAG = 'ハコチャット 添付：';
+
+function attachFolder_(channel) {
+  const folder = DriveApp.getFolderById(channel.folderId);
+  const it = folder.getFoldersByName(ATTACH_FOLDER_NAME);
+  while (it.hasNext()) {
+    const f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return folder.createFolder(ATTACH_FOLDER_NAME);
+}
+
+function safeFileName_(name) {
+  const s = String(name || 'ファイル').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim();
+  return s.slice(0, 120) || 'ファイル';
+}
+
+function api_upload(token, asId, channelId, name, mimeType, base64) {
+  const me = requireMember_(token, asId);
+  const c = requireChannel_(me, channelId);
+  const bytes = Utilities.base64Decode(String(base64 || ''));
+  if (!bytes.length) throw new Error('ファイルが空です');
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('ファイルが大きすぎます（1つ20MBまで）');
+  const fname = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd') + '_' + safeFileName_(name);
+  const file = attachFolder_(c).createFile(Utilities.newBlob(bytes, mimeType || 'application/octet-stream', fname));
+  file.setDescription(UPLOADER_TAG + me.id); // だれがアップロードしたかの印（投稿せずに外したとき、本人のものだけ消すため）
+  return { id: file.getId(), name: fname, mime: file.getMimeType() };
+}
+
+function checkFiles_(channel, files) {
+  const list = (files || []).slice(0, MAX_FILES_PER_POST);
+  if (!list.length) return [];
+  const folderId = attachFolder_(channel).getId();
+  return list.map(function (f) {
+    const file = DriveApp.getFileById(f.id);
+    const parents = file.getParents();
+    let ok = false;
+    while (parents.hasNext()) if (parents.next().getId() === folderId) ok = true;
+    if (!ok) throw new Error('添付できないファイルが含まれています');
+    return { id: file.getId(), name: file.getName(), mime: file.getMimeType() };
+  });
+}
+
+function parseFiles_(s) {
+  if (!s) return [];
+  try {
+    const a = JSON.parse(s);
+    return Array.isArray(a) ? a : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function fileUrl_(id) {
+  return 'https://drive.google.com/file/d/' + id + '/view';
+}
+
+function api_files(token, asId, channelId) {
+  const me = requireMember_(token, asId);
+  const c = requireChannel_(me, channelId);
+  const folder = DriveApp.getFolderById(c.folderId);
+  const list = function (f) {
+    const out = [];
+    const fs = f.getFolders();
+    while (fs.hasNext()) {
+      const x = fs.next();
+      if (x.isTrashed() || x.getName() === ATTACH_FOLDER_NAME) continue;
+      out.push({ name: x.getName(), kind: 'folder', url: x.getUrl(), updated: fmt_(x.getLastUpdated()) });
+    }
+    const files = f.getFiles();
+    while (files.hasNext()) {
+      const x = files.next();
+      if (x.isTrashed()) continue;
+      out.push({ name: x.getName(), kind: 'file', mime: x.getMimeType(), id: x.getId(), url: x.getUrl(), updated: fmt_(x.getLastUpdated()) });
+    }
+    return out.sort(function (a, b) {
+      return (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1) || a.name.localeCompare(b.name, 'ja');
+    });
+  };
+  const at = folder.getFoldersByName(ATTACH_FOLDER_NAME);
+  let attached = [];
+  while (at.hasNext()) {
+    const f = at.next();
+    if (!f.isTrashed()) { attached = list(f).filter(function (x) { return x.kind === 'file'; }).reverse(); break; }
+  }
+  const res = {
+    folderName: (c.no ? c.no + ' ' : '') + c.name,
+    folderUrl: folder.getUrl(),
+    place: c.place,
+    items: list(folder),
+    attached: attached,
+    canEdit: me.role !== ROLE.PARENT
+  };
+  if (me.isAdmin) res.permPlan = permissionPlanFor_(c);
+  return res;
+}
+
+function fmt_(d) {
+  return d ? Utilities.formatDate(d, TZ, 'yyyy-MM-dd HH:mm') : '';
+}
+
+const MAX_BODY = 5000;
+
+function requireMember_(token, asId) {
+  const who = identify_(token, asId);
+  if (!who.member) throw new Error('本人確認ができていません。ページを開き直してください。');
+  return who.member;
+}
+
+function cleanBody_(body, allowEmpty) {
+  const s = String(body == null ? '' : body).replace(/\r\n/g, '\n').trim();
+  if (!s && !allowEmpty) throw new Error('本文が空です');
+  if (s.length > MAX_BODY) throw new Error('本文が長すぎます（' + MAX_BODY + '文字まで）');
+  return s;
+}
+
+function findRow_(key, pred) {
+  return readAll_(key).filter(pred)[0] || null;
+}
+
+function requireChannel_(me, channelId) {
+  const c = findRow_('channels', function (x) { return x.id === channelId; });
+  if (!c || !canView_(c, me, channelMemberSet_())) throw new Error('このチャンネルには書き込めません');
+  return c;
+}
+
+function requireThread_(me, threadId) {
+  const t = findRow_('threads', function (x) { return x.id === threadId; });
+  if (!t) throw new Error('スレッドが見つかりません');
+  requireChannel_(me, t.channelId);
+  return t;
+}
+
+function requirePost_(me, postId) {
+  const p = findRow_('posts', function (x) { return x.id === postId; });
+  if (!p || p.deleted === '○') throw new Error('投稿が見つかりません');
+  const t = requireThread_(me, p.threadId);
+  return { post: p, thread: t };
+}
+
+function setRead_(memberId, threadId, at) {
+  const r = findRow_('reads', function (x) { return x.memberId === memberId && x.threadId === threadId; });
+  if (r) {
+    if (r.readAt < at) { r.readAt = at; updateRow_('reads', r); }
+  } else {
+    append_('reads', { memberId: memberId, threadId: threadId, readAt: at });
+  }
+}
+
+function api_newThread(token, asId, channelId, body, files) {
+  const me = requireMember_(token, asId);
+  const text = cleanBody_(body, files && files.length);
+
+  return withLock_(function () {
+    const c = requireChannel_(me, channelId);
+    const fl = checkFiles_(c, files);
+    const t = now_(), tid = newId_('t_'), pid = newId_('p_');
+    append_('threads', { id: tid, channelId: channelId, authorId: me.id, createdAt: t, updatedAt: t, pinned: '' });
+    append_('posts', { id: pid, threadId: tid, authorId: me.id, createdAt: t, body: text, files: fl.length ? JSON.stringify(fl) : '' });
+    setRead_(me.id, tid, t);
+    return { threadId: tid, postId: pid, createdAt: t, files: fl.map(function (f) { return { id: f.id, name: f.name, mime: f.mime, url: fileUrl_(f.id) }; }) };
+  });
+}
+
+function api_reply(token, asId, threadId, body, files) {
+  const me = requireMember_(token, asId);
+  const text = cleanBody_(body, files && files.length);
+  return withLock_(function () {
+    const th = requireThread_(me, threadId);
+    const fl = checkFiles_(requireChannel_(me, th.channelId), files);
+    const t = now_(), pid = newId_('p_');
+    append_('posts', { id: pid, threadId: threadId, authorId: me.id, createdAt: t, body: text, files: fl.length ? JSON.stringify(fl) : '' });
+    th.updatedAt = t;
+    updateRow_('threads', th);
+    setRead_(me.id, threadId, t);
+    return { postId: pid, createdAt: t, files: fl.map(function (f) { return { id: f.id, name: f.name, mime: f.mime, url: fileUrl_(f.id) }; }) };
+  });
+}
+
+function api_editPost(token, asId, postId, body) {
+  const me = requireMember_(token, asId);
+  const text = cleanBody_(body);
+  return withLock_(function () {
+    const p = requirePost_(me, postId).post;
+    if (p.authorId !== me.id) throw new Error('自分の投稿だけ編集できます');
+    p.body = text;
+    p.editedAt = now_();
+    updateRow_('posts', p);
+    return { ok: true, editedAt: p.editedAt };
+  });
+}
+
+function api_deletePost(token, asId, postId) {
+  const me = requireMember_(token, asId);
+  withLock_(function () {
+    const p = requirePost_(me, postId).post;
+    if (p.authorId !== me.id && !me.isAdmin) throw new Error('自分の投稿だけ削除できます');
+    p.deleted = '○';
+    p.editedAt = now_();
+    updateRow_('posts', p);
+  });
+  return { ok: true };
+}
+
+function api_react(token, asId, postId, kind, on) {
+  const me = requireMember_(token, asId);
+  if (REACTION_KINDS.indexOf(kind) < 0) throw new Error('反応の種類が正しくありません');
+  withLock_(function () {
+    requirePost_(me, postId);
+    const r = findRow_('reactions', function (x) { return x.postId === postId && x.memberId === me.id && x.kind === kind; });
+    if (on && !r) append_('reactions', { postId: postId, memberId: me.id, kind: kind, createdAt: now_() });
+    if (!on && r) deleteRow_('reactions', r._row);
+  });
+  return { ok: true };
+}
+
+function api_markRead(token, asId, threadIds) {
+  const me = requireMember_(token, asId);
+  const ids = (threadIds || []).slice(0, 50);
+  return withLock_(function () {
+    const t = now_();
+    ids.forEach(function (id) {
+      try { requireThread_(me, id); } catch (e) { return; }
+      setRead_(me.id, id, t);
+    });
+    return { readAt: t };
+  });
+}
+
+function api_setPin(token, asId, threadId, on) {
+  const me = requireMember_(token, asId);
+  if (!me.isAdmin) throw new Error('全員へのピン止めは、管理者だけができます');
+  withLock_(function () {
+    const th = requireThread_(me, threadId);
+    th.pinned = on ? '○' : '';
+    updateRow_('threads', th);
+  });
+  return { ok: true };
+}
+
+function api_setMyPin(token, asId, threadId, on) {
+  const me = requireMember_(token, asId);
+  withLock_(function () {
+    requireThread_(me, threadId);
+    const r = findRow_('myPins', function (x) { return x.memberId === me.id && x.threadId === threadId; });
+    if (on && !r) append_('myPins', { memberId: me.id, threadId: threadId, createdAt: now_() });
+    if (!on && r) deleteRow_('myPins', r._row);
+  });
+  return { ok: true };
+}
+
+const ROLE_LABEL = { fileOrganizer: 'コンテンツ管理者', writer: '投稿者・編集者', reader: '閲覧者' };
+
+function internalDomain_() {
+  if (prop_('INTERNAL_DOMAIN')) return prop_('INTERNAL_DOMAIN');
+  return isDev_() ? 'internal.invalid' : ownerEmail_().split('@')[1];
+}
+
+function isInternal_(email) {
+  return String(email).toLowerCase().split('@')[1] === internalDomain_();
+}
+
+function isDummyEmail_(email) {
+  return /@example\.com$/i.test(String(email));
+}
+
+function desiredFor_(c, members, cmSet) {
+  const out = {};
+  if (c.type === 'off' || c.status !== '有効') return out;
+  const owner = ownerEmail_();
+  const sharedDrive = !isDev_();
+  members.forEach(function (m) {
+    if (m.status === '停止' || !m.email || m.email.toLowerCase() === owner) return;
+    if (!canView_(c, m, cmSet)) return;
+    const internal = isInternal_(m.email);
+    if (c.place !== 'admin' && internal) return;
+    let role;
+    if (m.role === ROLE.PARENT) role = 'reader';
+    else if (m.role === ROLE.STUDENT) role = 'writer';
+    else role = 'fileOrganizer';
+    if (!sharedDrive && role === 'fileOrganizer') role = 'writer';
+    out[m.email.toLowerCase()] = { role: role, memberId: m.id, name: m.name };
+  });
+  return out;
+}
+
+function permissionPlanFor_(c) {
+  const members = readAll_('members');
+  const want = desiredFor_(c, members, channelMemberSet_());
+  const have = {};
+  readAll_('drivePerms').forEach(function (r) { if (r.folderId === c.folderId) have[r.email] = r; });
+  const rows = Object.keys(want).map(function (email) {
+    const w = want[email], h = have[email];
+    let status;
+    if (isDummyEmail_(email)) status = '体験版の見本のため設定しない';
+    else if (h && h.role === w.role) status = '設定済み';
+    else status = h ? '権限を変える予定' : '追加する予定';
+    return { name: w.name, role: ROLE_LABEL[w.role], status: status };
+  });
+  Object.keys(have).forEach(function (email) {
+    if (!want[email]) {
+      const m = members.filter(function (x) { return x.email.toLowerCase() === email; })[0];
+      rows.push({ name: m ? m.name : email, role: ROLE_LABEL[have[email].role] || have[email].role, status: '外す予定' });
+    }
+  });
+  return {
+    note: (c.place === 'admin' ? '先生だけの場所のフォルダです。見られる人を全員追加します。' : '活動の共有ドライブのフォルダです。学校外の人だけを追加します（学校の人は共有ドライブのメンバーなので不要）。') +
+      (isDev_() ? '（体験版では、全員を学校外の人として扱います）' : ''),
+    rows: rows
+  };
+}
+
+function applyPermissions_() {
+  const members = readAll_('members');
+  const cmSet = channelMemberSet_();
+  const channels = readAll_('channels');
+  const log = [];
+  withLock_(function () {
+    const recs = readAll_('drivePerms');
+    const removeRows = [];
+    channels.forEach(function (c) {
+      const want = desiredFor_(c, members, cmSet);
+      const have = recs.filter(function (r) { return r.folderId === c.folderId; });
+
+      have.forEach(function (r) {
+        const w = want[r.email];
+        if (w && w.role === r.role) return;
+        try {
+          Drive.Permissions.remove(c.folderId, r.permId, { supportsAllDrives: true });
+          log.push('外した：' + c.name + '／' + r.email);
+        } catch (e) {
+          log.push('外せなかった：' + c.name + '／' + r.email + '（' + e.message + '）');
+        }
+        removeRows.push(r._row);
+        r._removed = true;
+      });
+
+      Object.keys(want).forEach(function (email) {
+        if (isDummyEmail_(email)) return;
+        if (have.some(function (r) { return r.email === email && !r._removed; })) return;
+        try {
+          const p = Drive.Permissions.create({ role: want[email].role, type: 'user', emailAddress: email }, c.folderId,
+            { supportsAllDrives: true, sendNotificationEmail: false });
+          append_('drivePerms', { folderId: c.folderId, email: email, role: want[email].role, permId: p.id, memberId: want[email].memberId, addedAt: now_() });
+          log.push('追加した：' + c.name + '／' + email + '（' + ROLE_LABEL[want[email].role] + '）');
+        } catch (e) {
+          log.push('追加できなかった：' + c.name + '／' + email + '（' + e.message + '）');
+        }
+      });
+    });
+
+    removeRows.sort(function (a, b) { return b - a; }).forEach(function (row) { deleteRow_('drivePerms', row); });
+  });
+  return log;
+}
+
+function api_applyPermissions(token, asId) {
+  const me = requireMember_(token, asId);
+  if (!me.isAdmin) throw new Error('管理者だけが実行できます');
+  return applyPermissions_();
+}
+
+const DUMMY_CLUB_FOLDERS = [
+  '02 塩酸のさび班', '10 ロボットプログラミング', '11 科学の祭典', '23 空気砲', '30 個人研究2026',
+  '79 活動予定', '80 活動予定・欠席連絡', '91 削除予定', '98 未整理写真', '99 交流・その他', 'アクセス制限'
+];
+
+function ensureSetup_() {
+  if (prop_('DATA_SHEET_ID')) return false;
+  if (!isOwner_()) throw new Error('まだ準備ができていません。管理者の先生が最初にアプリを開いて、準備をしてください。');
+  if (BUILD_TARGET === 'prod') return 'needSetup';
+  setupDev_();
+  return true;
+}
+
+function folderIdFrom_(s) {
+  const t = String(s || '').trim();
+  const m = t.match(/folders\/([\w-]+)/);
+  return m ? m[1] : t;
+}
+
+function api_setupProd(token, asId, club, admin, ownerName, settings) {
+  if (BUILD_TARGET !== 'prod') throw new Error('これは本番用の準備です');
+  if (prop_('DATA_SHEET_ID')) throw new Error('準備はもう済んでいます');
+  if (!isOwner_()) throw new Error('アプリの所有者だけが準備できます');
+  const clubId = folderIdFrom_(club), adminId = folderIdFrom_(admin);
+  if (!clubId || !adminId) throw new Error('2つの共有ドライブを入れてください');
+  if (clubId === adminId) throw new Error('活動の共有ドライブと、先生だけの共有ドライブは、別のものにしてください');
+  let clubF, adminF;
+  try { clubF = DriveApp.getFolderById(clubId); clubF.getName(); } catch (e) { throw new Error('活動の共有ドライブを開けません（IDかURLを確かめてください）'); }
+  try { adminF = DriveApp.getFolderById(adminId); adminF.getName(); } catch (e) { throw new Error('先生だけの共有ドライブを開けません（IDかURLを確かめてください）'); }
+
+  const ss = SpreadsheetApp.create('TSC_データ');
+  DriveApp.getFileById(ss.getId()).moveTo(adminF);
+  createSheets_(ss);
+  const p = props_();
+  p.setProperties({
+    ENV: 'prod', DATA_SHEET_ID: ss.getId(), CLUB_ROOT_ID: clubId, ADMIN_ROOT_ID: adminId,
+    INTERNAL_DOMAIN: ownerEmail_().split('@')[1]
+  });
+  if (!p.getProperty('SHARED_SECRET')) p.setProperty('SHARED_SECRET', randomSecret_());
+  if (settings) saveAppSettings_(settings);
+  ss__ = ss;
+  append_('members', {
+    id: 'm_owner', email: ownerEmail_(), name: String(ownerName || '').trim() || '管理者の先生', role: ROLE.TEACHER,
+    isAdmin: '○', status: '有効', createdAt: now_()
+  });
+  syncChannels_();
+  return { ok: true, channels: readAll_('channels').length, dataUrl: ss.getUrl() };
+}
+
+function setupDev_() {
+  const root = DriveApp.createFolder('TSC開発（ダミーデータ）');
+  const club = root.createFolder('部の共有ドライブ（ダミー）');
+  const admin = root.createFolder('先生だけ（ダミー）');
+  DUMMY_CLUB_FOLDERS.forEach(function (n) { club.createFolder(n); });
+
+  const ss = SpreadsheetApp.create('TSC_データ（開発）');
+  DriveApp.getFileById(ss.getId()).moveTo(admin);
+  createSheets_(ss);
+
+  const p = props_();
+  p.setProperties({ ENV: 'dev', DATA_SHEET_ID: ss.getId(), CLUB_ROOT_ID: club.getId(), ADMIN_ROOT_ID: admin.getId() });
+  if (!p.getProperty('SHARED_SECRET')) p.setProperty('SHARED_SECRET', randomSecret_());
+  ss__ = ss;
+  seedDevMembers_();
+}
+
+function createSheets_(ss) {
+  const first = ss.getSheets()[0];
+  Object.keys(SCHEMA).forEach(function (key, i) {
+    formatSheet_(i === 0 ? first.setName(SCHEMA[key].name) : ss.insertSheet(SCHEMA[key].name), SCHEMA[key]);
+  });
+}
+
+function formatSheet_(sh, def) {
+  const n = def.cols.length;
+  if (sh.getMaxColumns() > n) sh.deleteColumns(n + 1, sh.getMaxColumns() - n);
+  sh.getRange(1, 1, sh.getMaxRows(), n).setNumberFormat('@');
+  sh.getRange(1, 1, 1, n).setValues([def.cols.map(function (c) { return c[1]; })])
+    .setFontWeight('bold').setBackground('#eef3fb');
+  sh.setFrozenRows(1);
+}
+
+function ensureSheets_() {
+  const ss = ss_();
+  Object.keys(SCHEMA).forEach(function (key) {
+    const def = SCHEMA[key];
+    const sh = ss.getSheetByName(def.name);
+    if (!sh) { formatSheet_(ss.insertSheet(def.name), def); return; }
+    const n = def.cols.length;
+    const have = sh.getMaxColumns();
+    if (have < n) {
+      sh.insertColumnsAfter(have, n - have);
+      sh.getRange(1, have + 1, sh.getMaxRows(), n - have).setNumberFormat('@');
+      sh.getRange(1, have + 1, 1, n - have).setValues([def.cols.slice(have).map(function (c) { return c[1]; })])
+        .setFontWeight('bold').setBackground('#eef3fb');
+    }
+  });
+}
+
+function seedDevMembers_() {
+  const t = now_();
+  const m = function (id, email, name, role, grade, isAdmin, children) {
+    return { id: id, email: email, name: name, role: role, grade: grade || '', isAdmin: isAdmin ? '○' : '',
+      children: children || '', status: '有効', notify: role === ROLE.PARENT ? '○' : '', createdAt: t };
+  };
+  appendMany_('members', [
+    m('m_owner', Session.getEffectiveUser().getEmail(), '山田先生', ROLE.TEACHER, '', true),
+    m('m_s1', 'student1@example.com', '山田 太郎', ROLE.STUDENT, '2'),
+    m('m_s2', 'student2@example.com', '佐藤 花子', ROLE.STUDENT, '2'),
+    m('m_s3', 'student3@example.com', '鈴木 一郎', ROLE.STUDENT, '1'),
+    m('m_c1', 'coach1@example.com', '高橋コーチ', ROLE.COACH, ''),
+    m('m_p1', 'parent1@example.com', '山田 太郎 母', ROLE.PARENT, '', false, 'm_s1'),
+    m('m_p2', 'parent2@example.com', '佐藤 花子 父', ROLE.PARENT, '', false, 'm_s2')
+  ]);
+}
+
+function migrateRoleNames_() {
+  if (prop_('ROLE_NAMES_V2')) return;
+  withLock_(function () {
+    readAll_('members').forEach(function (m) {
+      if (m.role === '部' + '員') { m.role = ROLE.STUDENT; updateRow_('members', m); }
+    });
+  });
+  props_().setProperty('ROLE_NAMES_V2', '1');
+}
+
+function randomSecret_() {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Utilities.getUuid() + Date.now());
+  return Utilities.base64EncodeWebSafe(bytes);
+}
+
+const ABS_KINDS = ['欠席', '遅刻', '早退'];
+const MAX_ABS_NOTE = 500;
+
+function canSeeAbsNote_(m) {
+  return !!m && (m.role === ROLE.TEACHER || m.role === ROLE.COACH || m.isAdmin === true);
+}
+
+function requireAdmin_(token, asId) {
+  const me = requireMember_(token, asId);
+  if (!me.isAdmin) throw new Error('管理者だけが使えます');
+  return me;
+}
+
+function api_admin(token, asId) {
+  requireAdmin_(token, asId);
+  syncChannelsIfStale_();
+  const members = readAll_('members');
+  const cm = {};
+  readAll_('channelMembers').forEach(function (r) { (cm[r.channelId] = cm[r.channelId] || []).push(r.memberId); });
+  return {
+    owner: ownerEmail_(),
+    members: members.map(function (m) {
+      return {
+        id: m.id, email: m.email, name: m.name, role: m.role, grade: m.grade, isAdmin: isAdmin_(m), adminFlag: m.isAdmin === '○',
+        children: m.children ? m.children.split(',').filter(String) : [], status: m.status || '有効', notify: m.notify === '○',
+        notifyEmail: m.notifyEmail || ''
+      };
+    }),
+    channels: sortChannels_(readAll_('channels')).map(function (c) {
+      return { id: c.id, no: c.no, name: c.name, type: c.type, place: c.place, status: c.status, purpose: c.purpose, members: cm[c.id] || [] };
+    }),
+    absences: absenceList_(members)
+  };
+}
+
+function absenceList_(members) {
+  const byId = {};
+  members.forEach(function (m) { byId[m.id] = m; });
+  const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  const from = Utilities.formatDate(new Date(Date.now() - 14 * 86400000), TZ, 'yyyy-MM-dd');
+  return readAll_('posts').filter(function (p) { return p.absDate && p.deleted !== '○' && p.absDate >= from; })
+    .map(function (p) {
+      return {
+        date: p.absDate, kind: p.absKind, isPast: p.absDate < today,
+        student: byId[p.absStudentId] ? byId[p.absStudentId].name : '（退会したメンバー）',
+        from: byId[p.authorId] ? byId[p.authorId].name : '（退会したメンバー）',
+        fromRole: byId[p.authorId] ? byId[p.authorId].role : '', createdAt: p.createdAt, note: p.absNote || ''
+      };
+    })
+    .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt < b.createdAt ? -1 : 1); });
+}
+
+function validEmail_(s) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s));
+}
+
+function api_saveMember(token, asId, m) {
+  requireAdmin_(token, asId);
+  const email = String(m.email || '').trim().toLowerCase();
+  const name = String(m.name || '').trim();
+  if (!validEmail_(email)) throw new Error('メールアドレスが正しくありません');
+  if (!name) throw new Error('表示名を入れてください');
+  if ([ROLE.TEACHER, ROLE.STUDENT, ROLE.COACH, ROLE.PARENT].indexOf(m.role) < 0) throw new Error('区分が正しくありません');
+  withLock_(function () {
+    const all = readAll_('members');
+    if (all.some(function (x) { return x.email.toLowerCase() === email && x.id !== m.id; })) throw new Error('このメールアドレスは、すでに登録されています');
+    const studentIds = all.filter(function (x) { return x.role === ROLE.STUDENT; }).map(function (x) { return x.id; });
+    const row = m.id ? all.filter(function (x) { return x.id === m.id; })[0] : null;
+    if (m.id && !row) throw new Error('メンバーが見つかりません');
+    const isOwnerRow = row && row.email.toLowerCase() === ownerEmail_();
+    const o = row || { id: newId_('m_'), createdAt: now_() };
+    o.email = isOwnerRow ? row.email : email;
+    o.name = name;
+    o.role = isOwnerRow ? ROLE.TEACHER : m.role;
+    o.grade = m.role === ROLE.STUDENT ? String(m.grade || '') : '';
+    o.isAdmin = isOwnerRow || (m.adminFlag && m.role !== ROLE.STUDENT && m.role !== ROLE.PARENT) ? '○' : '';
+    o.children = m.role === ROLE.PARENT ? (m.children || []).filter(function (id) { return studentIds.indexOf(id) >= 0; }).join(',') : '';
+    o.status = isOwnerRow ? '有効' : (m.status === '停止' ? '停止' : '有効');
+    o.notify = m.role === ROLE.PARENT && m.notify ? '○' : '';
+
+    const ne = String(m.notifyEmail || '').trim().toLowerCase();
+    if (ne && !validEmail_(ne)) throw new Error('通知の送り先のメールアドレスが正しくありません');
+    o.notifyEmail = m.role === ROLE.PARENT ? ne : '';
+    if (row) updateRow_('members', o); else append_('members', o);
+  });
+  return { log: applyPermissions_() };
+}
+
+
+function roleFromText_(t) {
+  const aliases = {
+    '生徒': ROLE.STUDENT, '部員': ROLE.STUDENT, '保護者': ROLE.PARENT, '指導者': ROLE.COACH, 'コーチ': ROLE.COACH, '外部指導者': ROLE.COACH,
+    '管理者': ROLE.TEACHER, '先生': ROLE.TEACHER, '教員': ROLE.TEACHER, '顧問': ROLE.TEACHER
+  };
+  return aliases[t] || '';
+}
+const MAX_BULK_ROWS = 200;
+
+function api_addMembers(token, asId, rows, check) {
+  requireAdmin_(token, asId);
+  const list = (rows || []).slice(0, MAX_BULK_ROWS + 1);
+  if (!list.length) throw new Error('登録する行がありません');
+  if (list.length > MAX_BULK_ROWS) throw new Error('一度に登録できるのは' + MAX_BULK_ROWS + '人までです');
+  let result;
+  const work = function () {
+    const all = readAll_('members');
+    const emails = {};
+    all.forEach(function (x) { emails[x.email.toLowerCase()] = '登録済み'; });
+
+    const studentsByName = {};
+    const addStudent = function (name, id) { (studentsByName[name] = studentsByName[name] || []).push(id); };
+    all.filter(function (x) { return x.role === ROLE.STUDENT && x.status !== '停止'; }).forEach(function (x) { addStudent(x.name, x.id); });
+    const out = list.map(function (r, i) {
+      const o = { line: i + 1, name: String(r.name || '').trim(), email: String(r.email || '').trim().toLowerCase(),
+        roleText: String(r.role || '').trim(), grade: String(r.grade || '').trim().replace(/年$/, ''),
+        childText: String(r.children || '').trim(), notifyEmail: String(r.notifyEmail || '').trim().toLowerCase(), errors: [] };
+      o.role = roleFromText_(o.roleText);
+      o.id = newId_('m_');
+      if (!o.name) o.errors.push('表示名がない');
+      if (!validEmail_(o.email)) o.errors.push('メールアドレスが正しくない');
+      else if (emails[o.email]) o.errors.push(emails[o.email] === '登録済み' ? 'すでに登録されている' : 'この表の中で重複（' + emails[o.email] + '行目）');
+      else emails[o.email] = String(o.line);
+      if (!o.role) o.errors.push('区分が分からない（生徒・保護者・指導者・管理者のどれか）');
+      if (o.role === ROLE.STUDENT) {
+        if (['1', '2', '3'].indexOf(o.grade) < 0) o.errors.push('学年は1〜3');
+        if (o.name) addStudent(o.name, o.id);
+      }
+      if (o.notifyEmail && !validEmail_(o.notifyEmail)) o.errors.push('通知の送り先が正しくない');
+      return o;
+    });
+    out.forEach(function (o) {
+      o.children = [];
+      if (o.role !== ROLE.PARENT) return;
+      if (!o.childText) { o.errors.push('子どもの名前がない'); return; }
+      o.childText.split(/[、,，]/).map(function (s) { return s.trim(); }).filter(String).forEach(function (n) {
+        const ids = studentsByName[n] || [];
+        if (ids.length === 1) o.children.push(ids[0]);
+        else o.errors.push(ids.length ? '同じ名前の生徒が' + ids.length + '人いる（' + n + '）' : '生徒が見つからない（' + n + '）');
+      });
+    });
+    const ok = out.every(function (o) { return !o.errors.length; });
+    if (ok && !check) {
+      const t = now_();
+      appendMany_('members', out.map(function (o) {
+        return {
+          id: o.id, email: o.email, name: o.name, role: o.role, grade: o.role === ROLE.STUDENT ? o.grade : '',
+          isAdmin: o.role === ROLE.TEACHER ? '○' : '', children: o.children.join(','), status: '有効',
+          notify: o.role === ROLE.PARENT ? '○' : '', notifyEmail: o.role === ROLE.PARENT ? o.notifyEmail : '', createdAt: t
+        };
+      }));
+    }
+    result = {
+      ok: ok, added: ok && !check ? out.length : 0,
+      rows: out.map(function (o) { return { line: o.line, name: o.name, email: o.email, role: o.role || o.roleText, grade: o.role === ROLE.STUDENT ? o.grade : '', children: o.childText, errors: o.errors }; })
+    };
+  };
+  if (check) work(); else withLock_(work);
+  if (result.added) result.log = applyPermissions_();
+  return result;
+}
+
+function api_deleteMember(token, asId, memberId, withParents) {
+  return api_deleteMembers(token, asId, [memberId], withParents);
+}
+
+function api_deleteMembers(token, asId, memberIds, withParents) {
+  const me = requireAdmin_(token, asId);
+  const want = {};
+  (memberIds || []).forEach(function (id) { want[id] = true; });
+  if (!Object.keys(want).length) throw new Error('削除する人を選んでください');
+  if (want[me.id]) throw new Error('自分を削除することはできません');
+  const names = [];
+  withLock_(function () {
+    const all = readAll_('members');
+    const targets = all.filter(function (x) { return want[x.id]; });
+    if (targets.length !== Object.keys(want).length) throw new Error('メンバーが見つかりません');
+    if (targets.some(function (x) { return x.email.toLowerCase() === ownerEmail_(); })) throw new Error('アプリの所有者は削除できません');
+    const ids = {};
+    targets.forEach(function (x) { ids[x.id] = true; names.push(x.name); });
+
+    all.filter(function (x) { return x.role === ROLE.PARENT && x.children && !ids[x.id]; }).forEach(function (p) {
+      const kids = p.children.split(',').map(function (s) { return s.trim(); }).filter(String);
+      const rest = kids.filter(function (id) { return !ids[id]; });
+      if (rest.length === kids.length) return;
+      if (withParents && !rest.length) {
+        ids[p.id] = true;
+        names.push(p.name);
+      } else {
+        p.children = rest.join(',');
+        updateRow_('members', p);
+      }
+    });
+    const gone = function (r) { return ids[r.memberId] === true; };
+    deleteRowsWhere_('members', function (r) { return ids[r.id] === true; });
+    deleteRowsWhere_('channelMembers', gone);
+    deleteRowsWhere_('reads', gone);
+    deleteRowsWhere_('myPins', gone);
+  });
+  return { deleted: names, log: applyPermissions_() };
+}
+
+function api_setChannelType(token, asId, channelId, type) {
+  requireAdmin_(token, asId);
+  if (CHANNEL_TYPES.indexOf(type) < 0) throw new Error('種類が正しくありません');
+  withLock_(function () {
+    const c = findRow_('channels', function (x) { return x.id === channelId; });
+    if (!c) throw new Error('チャンネルが見つかりません');
+
+    if (type === 'parents' && c.place !== 'admin') {
+      throw new Error('「保護者のみ」は、先生だけの共有ドライブのフォルダにしか設定できません（活動の共有ドライブのファイルは、生徒がドライブから見られるため）。「＋ 新しいチャンネル」で、場所を「先生だけの共有ドライブ」にして作ってください');
+    }
+    c.type = type;
+    updateRow_('channels', c);
+  });
+  return { log: applyPermissions_() };
+}
+
+function api_setAppSettings(token, asId, settings) {
+  requireAdmin_(token, asId);
+  saveAppSettings_(settings);
+  return appSettings_();
+}
+
+function api_removeChannel(token, asId, channelId) {
+  requireAdmin_(token, asId);
+  syncChannels_();
+  let threads = 0;
+  withLock_(function () {
+    const c = findRow_('channels', function (x) { return x.id === channelId; });
+    if (!c) throw new Error('チャンネルが見つかりません');
+    if (c.status === '有効') throw new Error('フォルダがあるチャンネルは消せません。使わないときは「チャンネルにしない」にしてください');
+    threads = readAll_('threads').filter(function (t) { return t.channelId === channelId; }).length;
+    deleteRowsWhere_('channels', function (r) { return r.id === channelId; });
+    deleteRowsWhere_('channelMembers', function (r) { return r.channelId === channelId; });
+    deleteRowsWhere_('drivePerms', function (r) { return r.folderId === c.folderId; });
+  });
+  return { threads: threads };
+}
+
+function api_setChannelPurpose(token, asId, channelId, purpose) {
+  requireAdmin_(token, asId);
+  withLock_(function () {
+    const c = findRow_('channels', function (x) { return x.id === channelId; });
+    if (!c) throw new Error('チャンネルが見つかりません');
+    c.purpose = purpose === 'absence' ? 'absence' : '';
+    updateRow_('channels', c);
+  });
+  return { ok: true };
+}
+
+function api_setChannelMembers(token, asId, channelId, memberIds) {
+  requireAdmin_(token, asId);
+  withLock_(function () {
+    if (!findRow_('channels', function (x) { return x.id === channelId; })) throw new Error('チャンネルが見つかりません');
+    const valid = {};
+    readAll_('members').forEach(function (m) { if (m.role === ROLE.STUDENT) valid[m.id] = true; });
+    const rows = readAll_('channelMembers').filter(function (r) { return r.channelId === channelId; });
+    rows.map(function (r) { return r._row; }).sort(function (a, b) { return b - a; })
+      .forEach(function (row) { deleteRow_('channelMembers', row); });
+    appendMany_('channelMembers', (memberIds || []).filter(function (id) { return valid[id]; })
+      .map(function (id) { return { channelId: channelId, memberId: id }; }));
+  });
+  return { log: applyPermissions_() };
+}
+
+function api_newChannel(token, asId, folderName, place) {
+  const me = requireMember_(token, asId);
+  if (!me.isAdmin && me.role !== ROLE.COACH) throw new Error('チャンネルを作れるのは、管理者と指導者です');
+  const name = safeFileName_(folderName);
+  if (!String(folderName || '').trim()) throw new Error('フォルダの名前を入れてください');
+  const rootId = place === 'admin' ? prop_('ADMIN_ROOT_ID') : prop_('CLUB_ROOT_ID');
+  const folder = DriveApp.getFolderById(rootId).createFolder(name);
+  syncChannels_();
+  CacheService.getScriptCache().put('channelSync', '1', SYNC_INTERVAL_SEC);
+  withLock_(function () {
+    const c = findRow_('channels', function (x) { return x.folderId === folder.getId(); });
+    if (c) {
+      c.type = 'all';
+      updateRow_('channels', c);
+    } else {
+
+      const p = parseFolderName_(name);
+      append_('channels', { id: newId_('c_'), folderId: folder.getId(), no: p.no, name: p.name, type: 'all', place: place === 'admin' ? 'admin' : 'club', status: '有効', createdAt: now_() });
+    }
+  });
+  applyPermissions_();
+  return buildHome_(me);
+}
+
+function api_loginSettings(token, asId) {
+  const who = identify_(token, '');
+  if (!who.isOwner) throw new Error('アプリの所有者だけが使えます');
+  return { loginUrl: prop_('LOGIN_URL'), appUrl: appUrl_(), secret: prop_('SHARED_SECRET') };
+}
+
+function api_setLoginUrl(token, asId, url) {
+  const who = identify_(token, '');
+  if (!who.isOwner) throw new Error('アプリの所有者だけが使えます');
+  const u = String(url || '').trim();
+  if (u && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u)) {
+    throw new Error('ログイン用アプリのURLは「https://script.google.com/macros/s/…/exec」の形で入れてください');
+  }
+  props_().setProperty('LOGIN_URL', u);
+  return api_loginSettings(token, asId);
+}
+
+function api_syncNow(token, asId) {
+  requireAdmin_(token, asId);
+  syncChannels_();
+  CacheService.getScriptCache().put('channelSync', '1', SYNC_INTERVAL_SEC);
+  return api_admin(token, asId);
+}
+
+function api_absence(token, asId, channelId, studentId, date, kind, note) {
+  const me = requireMember_(token, asId);
+  if (ABS_KINDS.indexOf(kind) < 0) throw new Error('種類が正しくありません');
+
+  const memo = String(note == null ? '' : note).replace(/\r\n/g, '\n').trim();
+  if (memo.length > MAX_ABS_NOTE) throw new Error('先生・指導者へのメモが長すぎます（' + MAX_ABS_NOTE + '文字まで）');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new Error('日付が正しくありません');
+  let sid;
+  if (me.role === ROLE.STUDENT) sid = me.id;
+  else if (me.role === ROLE.PARENT && me.children.indexOf(studentId) >= 0) sid = studentId;
+  else if (me.isAdmin) sid = studentId;
+  else throw new Error('欠席連絡を送れるのは、生徒本人と、その保護者と、先生です');
+  const student = findRow_('members', function (x) { return x.id === sid && x.role === ROLE.STUDENT; });
+  if (!student) throw new Error('生徒を選んでください');
+  const d = new Date(date + 'T00:00:00');
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  const text = student.name + '：' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + wd + '）' + kind + 'します。' +
+    (me.isAdmin && me.role !== ROLE.STUDENT && me.role !== ROLE.PARENT ? '（' + me.name + 'が登録）' : '');
+  withLock_(function () {
+    const c = requireChannel_(me, channelId);
+    if (c.purpose !== 'absence') throw new Error('このチャンネルは欠席連絡用ではありません');
+    const t = now_(), tid = newId_('t_');
+    append_('threads', { id: tid, channelId: channelId, authorId: me.id, createdAt: t, updatedAt: t, pinned: '' });
+    append_('posts', { id: newId_('p_'), threadId: tid, authorId: me.id, createdAt: t, body: text, absStudentId: sid, absDate: date, absKind: kind, absNote: memo });
+    setRead_(me.id, tid, t);
+  });
+  return buildHome_(me);
+}
+
+function api_search(token, asId, q) {
+  const me = requireMember_(token, asId);
+  const words = String(q || '').trim().toLowerCase().split(/\s+/).filter(String);
+  if (!words.length) return [];
+  const home = buildHome_(me);
+  const out = [];
+  home.threads.forEach(function (t) {
+    t.posts.forEach(function (p) {
+      if (p.deleted) return;
+      const hay = (p.body + ' ' + p.files.map(function (f) { return f.name; }).join(' ')).toLowerCase();
+      if (words.every(function (w) { return hay.indexOf(w) >= 0; })) {
+        out.push({ threadId: t.id, channelId: t.channelId, postId: p.id, author: p.author.name, createdAt: p.createdAt, body: p.body, files: p.files.map(function (f) { return f.name; }) });
+      }
+    });
+  });
+  return out.sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; }).slice(0, 100);
+}
+
+function api_discardUpload(token, asId, channelId, fileId) {
+  const me = requireMember_(token, asId);
+  const c = requireChannel_(me, channelId);
+  const used = readAll_('posts').some(function (p) { return p.files && p.files.indexOf(fileId) >= 0; });
+  if (used) return { ok: false };
+  const file = DriveApp.getFileById(fileId);
+  if (file.getDescription() !== UPLOADER_TAG + me.id) return { ok: false };
+  const folderId = attachFolder_(c).getId();
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === folderId) { file.setTrashed(true); return { ok: true }; }
+  }
+  return { ok: false };
+}
+
+function migrateDev_() {
+  if (!isDev_() || prop_('DEV_MIGRATED_PURPOSE')) return;
+  withLock_(function () {
+    readAll_('channels').forEach(function (c) {
+      if ((c.name === '活動予定・欠席連絡' || c.name === '欠席連絡（保護者）') && !c.purpose) { c.purpose = 'absence'; updateRow_('channels', c); }
+    });
+  });
+  props_().setProperty('DEV_MIGRATED_PURPOSE', '1');
+}
+
+function seedDevContentIfEmpty_() {
+  if (!isDev_() || readAll_('channels').length) return false;
+  const admin = DriveApp.getFolderById(prop_('ADMIN_ROOT_ID'));
+  admin.createFolder('欠席連絡（保護者）');
+  admin.createFolder('保護者連絡');
+  syncChannels_();
+
+  const chs = readAll_('channels');
+  const ch = function (name) { return chs.filter(function (c) { return c.name === name; })[0]; };
+  const types = {
+    '塩酸のさび班': 'members', 'ロボットプログラミング': 'members', '科学の祭典': 'public', '個人研究2026': 'all',
+    '活動予定': 'public', '活動予定・欠席連絡': 'all', '交流・その他': 'all', '欠席連絡（保護者）': 'parents', '保護者連絡': 'parents'
+  };
+  chs.forEach(function (c) {
+    if (types[c.name]) c.type = types[c.name];
+    if (c.name === '活動予定・欠席連絡' || c.name === '欠席連絡（保護者）') c.purpose = 'absence';
+    if (types[c.name] || c.purpose) updateRow_('channels', c);
+  });
+  appendMany_('channelMembers', [
+    { channelId: ch('塩酸のさび班').id, memberId: 'm_s1' }, { channelId: ch('塩酸のさび班').id, memberId: 'm_s3' },
+    { channelId: ch('ロボットプログラミング').id, memberId: 'm_s1' }, { channelId: ch('ロボットプログラミング').id, memberId: 'm_s3' }
+  ]);
+
+  const threads = [], posts = [], reads = [], reactions = [];
+
+  const thread = function (chName, pinned, list, readMap, rx) {
+    const tid = newId_('t_');
+    const ids = list.map(function (p) {
+      const pid = newId_('p_');
+      const o = { id: pid, threadId: tid, authorId: p[0], createdAt: p[1], body: p[2], files: '', editedAt: '', deleted: '' };
+      if (p[3]) { o.absStudentId = p[3][0]; o.absDate = p[3][1]; o.absKind = p[3][2]; }
+      posts.push(o);
+      return pid;
+    });
+    threads.push({ id: tid, channelId: ch(chName).id, authorId: list[0][0], createdAt: list[0][1], updatedAt: list[list.length - 1][1], pinned: pinned ? '○' : '' });
+    Object.keys(readMap || {}).forEach(function (mid) { reads.push({ memberId: mid, threadId: tid, readAt: readMap[mid] }); });
+    (rx || []).forEach(function (r) { reactions.push({ postId: ids[r[0]], memberId: r[1], kind: r[2], createdAt: list[r[0]][1] }); });
+  };
+
+  thread('活動予定', true, [
+    ['m_owner', '2026-10-01 08:00:00', '【固定】2学期の活動予定表です。変更があればこのスレッドでお知らせします。'],
+    ['m_owner', '2026-10-15 17:30:00', '10/23（金）は職員会議のため活動なしに変更しました。']
+  ], { m_owner: '2026-10-15 17:30:00', m_s1: '2026-10-02 12:00:00', m_s2: '2026-10-16 12:00:00', m_c1: '2026-10-16 12:00:00', m_p2: '2026-10-16 12:00:00' },
+  [[0, 'm_s1', 'see'], [0, 'm_s2', 'see'], [0, 'm_p1', 'see'], [0, 'm_c1', 'like'], [1, 'm_p2', 'see']]);
+
+  thread('科学の祭典', false, [
+    ['m_owner', '2026-10-16 16:20:00', '科学の祭典（11/8）の出展内容を決めました。当日は保護者の方の見学も歓迎です。'],
+    ['m_p2', '2026-10-16 19:05:00', '見学に伺います。駐車場はありますか？'],
+    ['m_owner', '2026-10-16 20:10:00', '体育館横の駐車場をご利用ください。'],
+    ['m_s2', '2026-10-17 18:40:00', 'ポスターの下書きができました！'],
+    ['m_c1', '2026-10-18 07:50:00', 'いいですね。タイトルの文字をもう少し大きくしましょう。']
+  ], { m_owner: '2026-10-16 21:00:00', m_s1: '2026-10-16 21:00:00', m_s2: '2026-10-18 08:00:00', m_c1: '2026-10-18 08:00:00', m_p1: '2026-10-16 17:00:00', m_p2: '2026-10-17 12:00:00' },
+  [[0, 'm_s2', 'like'], [0, 'm_c1', 'like'], [2, 'm_p2', 'see'], [3, 'm_owner', 'like'], [3, 'm_c1', 'like']]);
+
+  thread('塩酸のさび班', false, [
+    ['m_s3', '2026-10-14 16:00:00', '鉄くぎを塩酸に入れた実験の結果です。3日目で色が変わりました。'],
+    ['m_s1', '2026-10-14 16:30:00', '濃度を変えた比較もやってみたいです。'],
+    ['m_c1', '2026-10-17 21:00:00', '濃度を3段階にして、同じ日数で比べるとよいですよ。'],
+    ['m_s3', '2026-10-18 08:10:00', 'ありがとうございます。月曜日に準備します。']
+  ], { m_owner: '2026-10-14 17:00:00', m_s1: '2026-10-14 17:00:00', m_s3: '2026-10-18 09:00:00', m_c1: '2026-10-17 21:00:00' },
+  [[0, 'm_owner', 'see'], [0, 'm_s1', 'like']]);
+
+  thread('ロボットプログラミング', false, [
+    ['m_owner', '2026-10-12 15:00:00', 'ロボットのセンサーの資料をフォルダに置きました。']
+  ], { m_owner: '2026-10-12 15:00:00', m_s1: '2026-10-12 16:00:00', m_s3: '2026-10-13 10:00:00' }, [[0, 'm_s1', 'see'], [0, 'm_s3', 'see']]);
+
+  thread('活動予定・欠席連絡', false, [
+    ['m_s1', '2026-10-17 12:30:00', '山田 太郎：10/20（火）遅刻します。', ['m_s1', '2026-10-20', '遅刻']]
+  ], { m_owner: '2026-10-17 13:00:00', m_s1: '2026-10-17 12:30:00', m_s2: '2026-10-17 13:00:00' }, [[0, 'm_owner', 'see']]);
+
+  thread('欠席連絡（保護者）', false, [
+    ['m_p2', '2026-10-17 07:30:00', '佐藤 花子：10/17（土）欠席します。', ['m_s2', '2026-10-17', '欠席']],
+    ['m_owner', '2026-10-17 07:45:00', '承知しました。']
+  ], { m_owner: '2026-10-17 08:00:00', m_p2: '2026-10-17 08:00:00' }, [[0, 'm_owner', 'see']]);
+
+  thread('保護者連絡', false, [
+    ['m_owner', '2026-10-17 19:00:00', '保護者の皆さまへ：科学の祭典当日の送迎についてのお願いです。生徒には別途伝えます。']
+  ], { m_owner: '2026-10-17 19:00:00', m_p2: '2026-10-18 06:00:00' }, [[0, 'm_p2', 'see']]);
+
+  appendMany_('threads', threads);
+  appendMany_('posts', posts);
+  appendMany_('reads', reads);
+  appendMany_('reactions', reactions);
+  return true;
+}
+
+function ownerEmail_() {
+  return Session.getEffectiveUser().getEmail().toLowerCase();
+}
+
+function isOwner_() {
+  return (Session.getActiveUser().getEmail() || '').toLowerCase() === ownerEmail_();
+}
+
+function identify_(token, asId) {
+  let email = (Session.getActiveUser().getEmail() || '').toLowerCase();
+  let method = email ? 'auto' : 'none';
+  let error = '';
+  if (!email && token) {
+    const r = verifyToken_(token);
+    if (r.email) { email = r.email.toLowerCase(); method = 'token'; } else { error = r.error; }
+  }
+  if (!email) return { email: '', method: 'none', error: error };
+
+  const members = readAll_('members');
+  const real = members.find(function (x) { return x.email.toLowerCase() === email && x.status !== '停止'; }) || null;
+  const isOwner = email === ownerEmail_();
+  let me = real;
+  if (asId && isDev_() && isOwner) {
+    me = members.find(function (x) { return x.id === asId; }) || real;
+  }
+  const pm = me ? publicMember_(me) : null;
+  if (pm && pm.role === ROLE.PARENT) {
+    pm.notify = me.notify === '○'; // 「👤 設定」で、メールのお知らせを切り替えるため
+
+    pm.childrenInfo = pm.children.map(function (id) {
+      const c = members.filter(function (x) { return x.id === id; })[0];
+      return c ? { id: c.id, name: c.name } : null;
+    }).filter(Boolean);
+  }
+  return {
+    email: email, method: method, isOwner: isOwner,
+    member: pm,
+    impersonating: !!(me && real && me.id !== real.id)
+  };
+}
+
+function isAdmin_(m) {
+  return !!m && (m.role === ROLE.TEACHER || m.isAdmin === true || m.isAdmin === '○');
+}
+
+function publicMember_(m) {
+  return {
+    id: m.id, name: m.name, role: m.role, grade: m.grade, joinedAt: m.createdAt || '',
+    isAdmin: isAdmin_(m),
+    children: m.children ? m.children.split(',').map(function (s) { return s.trim(); }).filter(String) : []
+  };
+}
+
+function verifyToken_(token) {
+  const secret = prop_('SHARED_SECRET');
+  if (!secret) return { error: '合言葉（SHARED_SECRET）が設定されていません' };
+  const parts = String(token).split('.');
+  if (parts.length !== 2) return { error: 'ログイン情報の形式が正しくありません' };
+  const sig = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(parts[0], secret));
+  if (sig !== parts[1]) return { error: 'ログイン情報を確認できませんでした' };
+  let payload;
+  try {
+    payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString('UTF-8'));
+  } catch (err) {
+    return { error: 'ログイン情報を読み取れません' };
+  }
+  if (payload.exp * 1000 < Date.now()) return { error: 'ログインの有効期限が切れています。もう一度ログインしてください' };
+  return { email: payload.email };
+}
+
+const DIGEST_SNIPPET = 50;
+const DEFAULT_NOTIFY_HOUR = 18;
+
+function appUrl_() {
+  return prop_('APP_URL') || ScriptApp.getService().getUrl();
+}
+
+function notifyHour_() {
+  const s = prop_('NOTIFY_HOUR');
+  if (s === '') return DEFAULT_NOTIFY_HOUR; // まだ決めていないときは18時（空の文字は数にすると0になるので、先に調べる）
+  const h = Number(s);
+  return h >= 0 && h <= 23 ? h : DEFAULT_NOTIFY_HOUR;
+}
+
+function buildDigest_(m, since) {
+  const pm = publicMember_(m);
+  const home = buildHome_(pm);
+  const chName = {};
+  home.channels.forEach(function (c) { chName[c.id] = c.name; });
+  const items = [];
+  home.threads.forEach(function (t) {
+    t.posts.forEach(function (p) {
+      if (p.deleted || p.mine || p.createdAt <= since) return;
+      let text = p.body.replace(/\s+/g, ' ').trim();
+      if (!text && p.files.length) text = '（ファイル ' + p.files.length + '件）';
+      if (text.length > DIGEST_SNIPPET) text = text.slice(0, DIGEST_SNIPPET) + '…';
+      items.push({ channel: chName[t.channelId], author: p.author.name, createdAt: p.createdAt, text: text });
+    });
+  });
+  if (!items.length) return null;
+  items.sort(function (a, b) { return a.channel === b.channel ? (a.createdAt < b.createdAt ? -1 : 1) : a.channel.localeCompare(b.channel, 'ja'); });
+
+  const today = Utilities.formatDate(new Date(), TZ, 'M/d');
+  const subject = '【' + appName_() + '】新しい投稿が' + items.length + '件あります（' + today + '）';
+  const url = appUrl_();
+  let body = m.name + ' さん\n\n' + appName_() + ' に、新しい投稿が ' + items.length + ' 件あります。\n';
+  let html = '<p>' + htmlEsc_(m.name) + ' さん</p><p>' + htmlEsc_(appName_()) + ' に、新しい投稿が <b>' + items.length + ' 件</b>あります。</p>';
+  let last = null;
+  items.forEach(function (it) {
+    if (it.channel !== last) {
+      body += '\n# ' + it.channel + '\n';
+      html += (last === null ? '' : '</ul>') + '<p style="margin:12px 0 4px"><b># ' + htmlEsc_(it.channel) + '</b></p><ul style="margin:0;padding-left:20px">';
+      last = it.channel;
+    }
+    body += '・' + it.author + '（' + it.createdAt.slice(5, 16).replace('-', '/') + '）：' + it.text + '\n';
+    html += '<li>' + htmlEsc_(it.author) + '（' + it.createdAt.slice(5, 16).replace('-', '/') + '）：' + htmlEsc_(it.text) + '</li>';
+  });
+  html += '</ul>';
+  body += '\n続きは、アプリで読んでください：\n' + url + '\n\n' +
+    '――\nこのメールは送信専用です。返信しても届きません。\n' +
+    'メールでのお知らせを止めるには、アプリの左下の「👤 設定」で「メールで知らせる」を外してください。\n';
+  html += '<p style="margin-top:16px"><a href="' + url + '">' + htmlEsc_(appName_()) + ' を開く</a></p>' +
+    '<p style="color:#667085;font-size:12px">このメールは送信専用です。返信しても届きません。<br>' +
+    'メールでのお知らせを止めるには、アプリの左下の「👤 設定」で「メールで知らせる」を外してください。</p>';
+  return { to: notifyAddress_(m), subject: subject, body: body, htmlBody: html, count: items.length };
+}
+
+function notifyAddress_(m) {
+  return m.notifyEmail || m.email;
+}
+
+function htmlEsc_(s) {
+  return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+}
+
+function sendMail_(d) {
+  const opt = { to: d.to, subject: d.subject, body: d.body, htmlBody: d.htmlBody, name: appName_() };
+  if (!isDev_()) opt.noReply = true; // 返信を受け付けない（学校のアカウントで使える設定）
+  MailApp.sendEmail(opt);
+}
+
+function sendDailyDigest() {
+  const log = [];
+  const t = now_();
+  const members = readAll_('members').filter(function (m) { return m.role === ROLE.PARENT && m.status !== '停止' && m.notify === '○'; });
+  members.forEach(function (m) {
+    const since = m.notifiedAt || m.createdAt || '';
+    const d = buildDigest_(m, since);
+    if (d) {
+      if (isDummyEmail_(d.to)) {
+        log.push(m.name + '：' + d.count + '件（体験版の見本のため送らない）');
+      } else {
+        try {
+          sendMail_(d);
+          log.push(m.name + '：' + d.count + '件を送った');
+        } catch (e) {
+          log.push(m.name + '：送れなかった（' + e.message + '）');
+          return; // 送れなかったときは、次回もう一度送るため、通知した日時を更新しない
+        }
+      }
+    }
+    withLock_(function () {
+      const row = findRow_('members', function (x) { return x.id === m.id; });
+      if (row) { row.notifiedAt = t; updateRow_('members', row); }
+    });
+  });
+  props_().setProperty('NOTIFY_LAST_RUN', t + '｜' + (log.join('／') || '送る相手なし'));
+  return log;
+}
+
+function api_notifyInfo(token, asId) {
+  requireAdmin_(token, asId);
+  const triggers = ScriptApp.getProjectTriggers().filter(function (tr) { return tr.getHandlerFunction() === 'sendDailyDigest'; });
+  const parents = readAll_('members').filter(function (m) { return m.role === ROLE.PARENT && m.status !== '停止'; });
+  return {
+    hour: notifyHour_(),
+    scheduled: triggers.length > 0,
+    lastRun: prop_('NOTIFY_LAST_RUN'),
+    testTo: prop_('TEST_MAIL_TO'),
+    appUrl: appUrl_(),
+    previews: parents.map(function (m) {
+      const d = m.notify === '○' ? buildDigest_(m, m.notifiedAt || m.createdAt || '') : null;
+      return { id: m.id, name: m.name, notify: m.notify === '○', to: notifyAddress_(m), count: d ? d.count : 0, subject: d ? d.subject : '', body: d ? d.body : '', dummy: isDummyEmail_(notifyAddress_(m)) };
+    })
+  };
+}
+
+function api_setNotifySchedule(token, asId, hour) {
+  requireAdmin_(token, asId);
+  ScriptApp.getProjectTriggers().forEach(function (tr) {
+    if (tr.getHandlerFunction() === 'sendDailyDigest') ScriptApp.deleteTrigger(tr);
+  });
+  const h = Number(hour);
+  if (h >= 0 && h <= 23) {
+    props_().setProperty('NOTIFY_HOUR', String(h));
+    ScriptApp.newTrigger('sendDailyDigest').timeBased().atHour(h).everyDays(1).inTimezone(TZ).create();
+  }
+  return api_notifyInfo(token, asId);
+}
+
+function api_sendTestDigest(token, asId, parentId, toAddress) {
+  requireAdmin_(token, asId);
+  const to = String(toAddress || '').trim();
+  if (!validEmail_(to)) throw new Error('見本の送り先のメールアドレスを入れてください');
+  const m = findRow_('members', function (x) { return x.id === parentId; });
+  if (!m) throw new Error('保護者が見つかりません');
+  const d = buildDigest_(m, m.notifiedAt || m.createdAt || '');
+  if (!d) throw new Error('この保護者に知らせる新しい投稿はありません');
+  d.to = to;
+  d.subject = '［見本］' + d.subject;
+  sendMail_(d);
+  props_().setProperty('TEST_MAIL_TO', to);
+  return { to: to };
+}
+
+function api_sendDigestNow(token, asId) {
+  requireAdmin_(token, asId);
+  return sendDailyDigest();
+}
+
+function api_setMyNotify(token, asId, on) {
+  const me = requireMember_(token, asId);
+  if (me.role !== ROLE.PARENT) throw new Error('メールのお知らせは、保護者の方だけの機能です');
+  withLock_(function () {
+    const row = findRow_('members', function (x) { return x.id === me.id; });
+    row.notify = on ? '○' : '';
+    updateRow_('members', row);
+  });
+  return { notify: !!on };
+}
+
+  const __api = { api_init: api_init, api_home: api_home, api_upload: api_upload, api_files: api_files, api_newThread: api_newThread, api_reply: api_reply, api_editPost: api_editPost, api_deletePost: api_deletePost, api_react: api_react, api_markRead: api_markRead, api_setPin: api_setPin, api_setMyPin: api_setMyPin, api_applyPermissions: api_applyPermissions, api_setupProd: api_setupProd, api_admin: api_admin, api_saveMember: api_saveMember, api_addMembers: api_addMembers, api_deleteMember: api_deleteMember, api_deleteMembers: api_deleteMembers, api_setChannelType: api_setChannelType, api_setAppSettings: api_setAppSettings, api_removeChannel: api_removeChannel, api_setChannelPurpose: api_setChannelPurpose, api_setChannelMembers: api_setChannelMembers, api_newChannel: api_newChannel, api_loginSettings: api_loginSettings, api_setLoginUrl: api_setLoginUrl, api_syncNow: api_syncNow, api_absence: api_absence, api_search: api_search, api_discardUpload: api_discardUpload, api_notifyInfo: api_notifyInfo, api_setNotifySchedule: api_setNotifySchedule, api_sendTestDigest: api_sendTestDigest, api_sendDigestNow: api_sendDigestNow, api_setMyNotify: api_setMyNotify };
+  // google.script.run の代わり（本物と同じく、やり取りするデータはコピーして渡す）
+  const copy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+  window.google = { script: { run: (function make(ok, ng) {
+    return new Proxy({}, { get: function (_, k) {
+      if (k === 'withSuccessHandler') return function (f) { return make(f, ng); };
+      if (k === 'withFailureHandler') return function (f) { return make(ok, f); };
+      return function () {
+        const args = copy(Array.prototype.slice.call(arguments));
+        setTimeout(function () {
+          let out;
+          try { out = copy(__api[k].apply(null, args)); } catch (e) { if (ng) ng(new Error(e.message)); return; }
+          if (ok) ok(out);
+        }, 150);
+      };
+    } });
+  })() } };
+  // リンクは開かない（Googleドライブなどは体験版にはない）
+  document.addEventListener('click', function (e) {
+    const a = e.target.closest && e.target.closest('a[href^="http"]');
+    if (!a) return;
+    e.preventDefault();
+    if (window.toast) window.toast('体験版では、Googleドライブやリンク先は開きません');
+  }, true);
+})();
+</script>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --side: #1f3a5f; --side-text: #dfe7f2; --side-active: #2f5a8f;
+    --text: #1f2328; --sub: #667085; --line: #e3e6ea; --accent: #1a73e8; --unread: #d93025; --ok: #188038; --ng: #d93025;
+    --new-bg: #fff7e6; --pin: #b26a00; --chip: #eef3fb;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif; background: var(--bg); color: var(--text); font-size: 15px; display: flex; flex-direction: column; }
+  button, select, input, textarea { font: inherit; }
+  button { cursor: pointer; }
+  .devbar { background: #fff3cd; border-bottom: 1px solid #f0d58a; padding: 6px 16px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+  .app { display: flex; flex: 1; min-height: 0; }
+  /* サイドバー */
+  .side { width: 250px; background: var(--side); color: var(--side-text); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+  .side h1 { font-size: 18px; margin: 0; padding: 16px 16px 4px; color: #fff; }
+  .me { padding: 0 16px 12px; font-size: 13px; opacity: .85; }
+  .side .sec { padding: 12px 16px 4px; font-size: 12px; opacity: .7; }
+  .side .item { display: flex; justify-content: space-between; align-items: center; padding: 6px 16px; color: var(--side-text); background: none; border: 0; width: 100%; text-align: left; }
+  .side .item:hover { background: rgba(255,255,255,.08); }
+  .side .item.active { background: var(--side-active); color: #fff; font-weight: bold; }
+  .side .item.has-unread { color: #fff; font-weight: bold; }
+  .badge { background: var(--unread); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: bold; }
+  .tag { font-size: 10px; border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; font-weight: normal; }
+  .t-members { background: #5b6b80; color: #fff; }
+  .t-public { background: #e8a33d; color: #3a2600; }
+  .t-parents { background: #d46a8a; color: #fff; }
+  .side .bottom { margin-top: auto; padding: 8px 16px 16px; font-size: 12px; }
+  .side .bottom a { color: var(--side-text); }
+  /* メイン */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .head { background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .head h2 { font-size: 18px; margin: 0; flex: 1; min-width: 120px; }
+  .env { font-size: 11px; background: #e8a33d; color: #3a2600; border-radius: 4px; padding: 1px 6px; }
+  .menu-btn { display: none; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 10px; }
+  .btn { display: inline-block; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; padding: 6px 12px; text-decoration: none; }
+  .btn.sub { background: #fff; color: var(--accent); }
+  .btn.small { padding: 3px 10px; font-size: 13px; }
+  .btn.sub.danger { color: var(--ng); border-color: var(--ng); }
+  .list { flex: 1; overflow-y: auto; padding: 12px 16px 40px; }
+  .note { color: var(--sub); font-size: 13px; margin: 4px 0 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; max-width: 760px; }
+  .ok { color: var(--ok); font-weight: bold; }
+  .ng { color: var(--ng); font-weight: bold; }
+  /* スレッド */
+  .thread { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .thread.pinned { border-color: #f0c36d; }
+  .thread.has-new { box-shadow: inset 4px 0 0 var(--unread); }
+  .t-top { display: flex; gap: 8px; align-items: center; padding: 8px 14px 0; font-size: 12px; color: var(--sub); flex-wrap: wrap; }
+  .chtag { background: var(--chip); color: var(--side); border-radius: 4px; padding: 1px 6px; }
+  .pintag { color: var(--pin); font-weight: bold; }
+  .post { display: flex; gap: 10px; padding: 8px 14px; }
+  .post.new { background: var(--new-bg); }
+  .post.reply { padding-left: 34px; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .body { flex: 1; min-width: 0; }
+  .name { font-weight: bold; }
+  .role { font-size: 11px; color: var(--sub); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .time { font-size: 12px; color: var(--sub); margin-left: 6px; }
+  .newmark { font-size: 11px; color: #fff; background: var(--unread); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+  .text { white-space: pre-wrap; word-break: break-word; margin-top: 2px; line-height: 1.6; }
+  .text a { color: var(--accent); }
+  .acts { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; position: relative; }
+  .react { border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 1px 9px; font-size: 13px; }
+  .react.on { border-color: var(--accent); background: #e8f0fe; }
+  .readers { margin-left: auto; font-size: 12px; color: var(--sub); background: none; border: 0; padding: 2px 4px; }
+  .readers.clickable { color: var(--accent); text-decoration: underline; }
+  .pop { position: absolute; right: 0; top: 26px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 8px 12px; font-size: 13px; z-index: 5; min-width: 180px; }
+  .pop b { display: block; margin-bottom: 4px; }
+  .fold { margin: 2px 14px 2px 48px; background: none; border: 0; color: var(--accent); font-size: 13px; padding: 4px 0; }
+  .replybox { display: flex; gap: 6px; padding: 8px 14px 12px 48px; }
+  .replybox textarea { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 0; resize: none; line-height: 1.5; }
+  .replybox .btn { align-self: flex-end; }
+  .mini { background: none; border: 0; color: var(--sub); font-size: 12px; padding: 2px 4px; }
+  .mini:hover { color: var(--accent); text-decoration: underline; }
+  .text.deleted { color: var(--sub); font-style: italic; }
+  textarea.edit { width: 100%; min-height: 70px; border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; margin-top: 4px; }
+  .composer { background: var(--panel); border: 2px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .composer textarea { width: 100%; height: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; margin-top: 8px; }
+  .composer .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  body.busy, body.busy button { cursor: progress; }
+  .sending { font-size: 12px; color: var(--sub); }
+  .sending::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* タブ（スレッド／ファイル） */
+  .tabs { background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 16px; display: flex; gap: 4px; }
+  .tabs:empty { display: none; }
+  .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px; color: var(--sub); }
+  .tabs button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: bold; }
+  /* 添付 */
+  .attach-btn { border: 1px solid var(--line); background: #fff; color: var(--side); border-radius: 6px; padding: 0 10px; align-self: flex-end; height: 32px; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+  .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 0 48px; }
+  .composer .chips { padding: 6px 0 0; }
+  .chip { background: var(--chip); color: var(--side); border-radius: 14px; padding: 2px 10px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .chip button { background: none; border: 0; color: var(--sub); padding: 0; font-size: 14px; line-height: 1; }
+  .chip.up { opacity: .6; }
+  .files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .file { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--side); text-decoration: none; max-width: 100%; }
+  .file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thumb { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+  .thumb img { display: block; max-width: 220px; max-height: 160px; }
+  /* ファイルのタブ */
+  .crumb { font-size: 13px; color: var(--sub); margin-bottom: 8px; }
+  .fbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  table.ftable { border-collapse: collapse; width: 100%; background: #fff; font-size: 14px; margin-bottom: 14px; }
+  table.ftable th, table.ftable td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+  table.ftable th { background: #f0f3f7; }
+  table.ftable a { color: var(--text); text-decoration: none; }
+  table.ftable a:hover { color: var(--accent); text-decoration: underline; }
+  h3.fh { font-size: 15px; margin: 14px 0 6px; }
+  /* 管理・欠席連絡・検索 */
+  .search { border: 1px solid var(--line); border-radius: 18px; padding: 5px 12px; width: 190px; }
+  .composer .lbl { width: 5em; color: var(--sub); font-size: 13px; flex-shrink: 0; }
+  .composer input:not([type=checkbox]):not([type=radio]), .composer select { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .composer input#mfName, .composer input#mfEmail, .composer input#ncName { flex: 1; min-width: 200px; }
+  .composer.abs { border-color: #2e7d32; }
+  .btn.abs { background: #2e7d32; border-color: #2e7d32; }
+  .abs-note { background: #e8f5e9; border-radius: 6px; padding: 8px 10px; color: #1b5e20; }
+  .thread.result { cursor: pointer; }
+  .thread.result:hover { border-color: var(--accent); }
+  .thread.flash { box-shadow: 0 0 0 3px #ffd54f; transition: box-shadow .3s; }
+  mark { background: #ffe58f; }
+  .abs-memo { flex: 1; min-height: 54px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+  .abs-private { margin-top: 6px; background: #fdf2f5; border: 1px dashed #d46a8a; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: #8a2846; }
+  .abs-private span { white-space: pre-wrap; color: var(--text); }
+  .role-desc { margin: 0; padding: 6px 10px 6px 26px; background: #f6f8fb; border-radius: 6px; font-size: 13px; color: #444; line-height: 1.7; flex: 1; }
+  .t-tools { display: flex; gap: 6px; padding: 0 14px 6px; justify-content: flex-end; }
+  .t-tools button { background: none; border: 0; color: var(--sub); font-size: 12px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #323232; color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 14px; display: none; z-index: 20; max-width: 90%; }
+  /* スマホ */
+  @media (max-width: 760px) {
+    .side { position: fixed; top: 0; bottom: 0; left: 0; z-index: 10; transform: translateX(-100%); transition: transform .2s; }
+    .side.open { transform: none; box-shadow: 4px 0 16px rgba(0,0,0,.3); }
+    .menu-btn { display: inline-block; }
+    .list { padding: 10px 8px 40px; }
+    .post.reply { padding-left: 14px; }
+    .fold { margin-left: 14px; }
+    .replybox { padding-left: 14px; }
+    .chips { padding-left: 14px; }
+    .search { width: 100%; order: 5; }
+    table.ftable { font-size: 13px; }
+    .thumb img { max-width: 160px; }
+  }
+</style>
+</head>
+<body data-token="">
+  <div id="devbar" class="devbar" style="display:none"></div>
+  <div class="app" id="app">
+    <nav class="side" id="side"></nav>
+    <main class="main">
+      <div class="head">
+        <button class="menu-btn" onclick="toggleSide()">≡</button>
+        <h2 id="title">ハコチャット</h2>
+        <span id="envTag"></span>
+        <input class="search" id="searchBox" placeholder="🔍 検索（Enter）" onkeydown="if(event.key==='Enter')doSearch(this.value)">
+        <button class="btn sub small" id="allBtn" style="display:none" onclick="toggleAll()">すべて表示</button>
+        <button class="btn small abs" id="absBtn" style="display:none" onclick="openAbsence()">📝 欠席連絡</button>
+        <button class="btn small" id="newBtn" style="display:none" onclick="openComposer()">＋ 新しいスレッド</button>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="list" id="list"><p class="note">読み込み中…</p></div>
+      <input type="file" id="filePicker" multiple style="display:none">
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+  // ===== ログイン情報（学校外の人のトークン）と、開発用の「表示する人」 =====
+  const store = {
+    get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set: function (k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
+  };
+  const urlToken = document.body.dataset.token || '';
+  if (urlToken) store.set('tsc_token', urlToken);
+  const token = urlToken || store.get('tsc_token');
+  let asId = store.get('tsc_as');
+
+  // ===== 状態 =====
+  // snap：画面を開いた時点の既読日時。折りたたみはこれを基準にする（読んでいる途中で急に閉じないように）
+  // openFolds：スレッドごとの開閉（true＝開いている、'closed'＝閉じている、なし＝全体の設定に従う）
+  // drafts：書きかけの文（新着の確認で画面を描き直しても消えないように）
+  const state = {
+    res: null, home: null, view: 'stream', showAll: false, openFolds: {}, snap: {}, pop: null,
+    composing: false, editing: null, drafts: {}, busy: false, pendingRender: false,
+    tab: 'threads', files: null, attach: {}
+  };
+  const MAX_FILE_BYTES = 20 * 1024 * 1024;
+  // クリップの線画（絵文字の📎はWindowsでは分かりにくい絵になるため）
+  const CLIP_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+  const TYPE_TAG = { members: '限定', public: '保護者も', parents: '保護者のみ' };
+  const POLL_SEC = 30;
+  const READ_DELAY_MS = 1500;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function linkify(s) {
+    return esc(s).replace(/https?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>'; });
+  }
+  function shortTime(t) { return t ? t.slice(5, 16).replace('-', '/') : ''; }
+  function color(id) {
+    const c = ['#1f3a5f', '#2e7d32', '#6a1b9a', '#00838f', '#e65100', '#ad1457', '#5d4037', '#283593', '#558b2f'];
+    let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return c[h % c.length];
+  }
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(toast.h); toast.h = setTimeout(function () { t.style.display = 'none'; }, 3000);
+  }
+  function call(fn) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn].apply(null, args);
+    });
+  }
+  function showError(e) {
+    document.getElementById('list').innerHTML = '<div class="card"><span class="ng">エラー</span>：' + esc(e.message || e) + '</div>';
+  }
+
+  /** 書き込みの操作を送る。終わったら画面のデータを入れ替える */
+  function act(fn) {
+    if (state.busy) return Promise.resolve(false);
+    state.busy = true;
+    document.body.classList.add('busy');
+    const args = [fn, token, asId].concat(Array.prototype.slice.call(arguments, 1));
+    // 反応などの記録が残っていれば、それが終わってから送る（戻ってきたデータに反映されるように）
+    const waitAll = Promise.all(Object.keys(chains).map(function (k) { return chains[k]; }));
+    return waitAll.then(function () { return call.apply(null, args); }).then(function (home) {
+      state.home = home;
+      return true;
+    }).catch(function (e) {
+      toast('できませんでした：' + (e.message || e));
+      return false;
+    }).finally(function () {
+      state.busy = false;
+      document.body.classList.remove('busy');
+    });
+  }
+
+  // ===== 読み込み =====
+  function init() {
+    document.getElementById('list').innerHTML = '<p class="note">読み込み中…</p>';
+    call('api_init', token, asId).then(function (res) {
+      state.res = res;
+      state.home = res.home || null;
+      state.ver = res.ver || '';
+      state.view = 'stream';
+      state.drafts = {};
+      takeSnap();
+      applyApp(res.app);
+      renderAll();
+      checkNewVersion();
+    }).catch(showError);
+  }
+
+  // ===== アプリの表示（名前・色）と版 =====
+  function applyApp(app) {
+    if (!app) return;
+    const c = app.colors.filter(function (x) { return x.id === app.color; })[0] || app.colors[0];
+    document.documentElement.style.setProperty('--side', c.side);
+    document.documentElement.style.setProperty('--side-active', c.active);
+    document.title = app.name;
+  }
+  /** 新しい版があるか確かめる（管理者だけ。配布用の版だけ。失敗しても何もしない） */
+  function checkNewVersion() {
+    const app = state.res && state.res.app;
+    const me = state.res && state.res.who && state.res.who.member;
+    if (!app || !app.versionUrl || !me || !me.isAdmin || !window.fetch) return;
+    // version.json の形：{ version, url, history: [{ version, date, notes: [変更点, …] }, …] }
+    fetch(app.versionUrl, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (v) {
+      if (!v || !v.version || !newerVersion(v.version, app.version)) return;
+      // 今の版より新しい版の変更点を、新しい順に集める
+      v.changes = (v.history || []).filter(function (h) { return h && h.version && newerVersion(h.version, app.version); });
+      state.newVersion = v;
+      if (state.home) renderSide();
+      if (state.view === 'admin' && state.adminTab === 'notify') renderAdmin();
+    }).catch(function () {});
+  }
+  /** 新しい版の変更点（管理画面に出す） */
+  function newVersionHtml() {
+    const v = state.newVersion;
+    if (!v) return '';
+    let h = '<div class="card" style="border-color:#e8a33d;background:#fffaf0"><b>🆕 新しい版 ' + esc(v.version) + ' があります</b>（今の版：' + esc(state.res.app.version) + '）';
+    h += (v.changes || []).map(function (c) {
+      return '<div style="margin-top:6px"><b>版 ' + esc(c.version) + '</b>' + (c.date ? '（' + esc(c.date) + '）' : '') +
+        '<ul style="margin:2px 0 0;padding-left:1.4em">' + (c.notes || []).map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
+    }).join('');
+    if (v.url) h += '<p style="margin:8px 0 0"><a class="btn small" href="' + esc(v.url) + '" target="_blank" rel="noopener">更新のしかたを見る</a></p>';
+    return h + '</div>';
+  }
+  function newerVersion(a, b) {
+    const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
+    return false;
+  }
+  function refresh() {
+    if (!state.home || state.busy || state.pendingOps > 0 || document.visibilityState !== 'visible') return;
+    // 前回の版を渡す。だれも書き込んでいなければ「変わっていない」とだけ返ってくるので、何もしない
+    call('api_home', token, asId, state.ver).then(function (home) {
+      if (home.unchanged || state.pendingOps > 0) return;
+      state.home = home; state.ver = home.ver; renderSoon();
+    }).catch(function () {});
+  }
+  setInterval(refresh, POLL_SEC * 1000);
+
+  /** 入力中に描き直すと、入力欄の文字の位置などが失われるので、入力が終わってから描き直す */
+  function renderSoon() {
+    // 管理画面は入力欄が多いので、新着の確認では左の一覧だけを描き直す
+    if (state.view === 'admin') { renderSide(); return; }
+    const a = document.activeElement;
+    if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || a.tagName === 'SELECT') && document.getElementById('list').contains(a)) {
+      state.pendingRender = true;
+      return;
+    }
+    state.pendingRender = false;
+    renderAll();
+  }
+  // 入力欄から離れても、すぐには描き直さない。
+  // ボタンを押したときは「入力欄から離れる」が先に起きるので、すぐ描き直すとボタンが作り直されて、押したことが無視されてしまう。
+  document.addEventListener('focusout', function () {
+    setTimeout(function () { if (state.pendingRender) renderSoon(); }, 800);
+  });
+
+  function takeSnap() {
+    state.snap = {}; state.openFolds = {}; state.showAll = false; state.pop = null; state.editing = null;
+    if (state.home) state.home.threads.forEach(function (t) { state.snap[t.id] = t.myRead; });
+  }
+
+  // ===== 描画 =====
+  function renderAll() {
+    const res = state.res;
+    document.getElementById('envTag').innerHTML = res.env === 'dev' ? '<span class="env">体験版（見本のデータ）</span>' : '';
+    renderDevbar(res);
+    if (res.needSetup) { renderSetup(res); return; }
+    if (!res.who.member) { renderNoMember(res); return; }
+    renderSide();
+    renderTabs();
+    setHeadButtons();
+    if (state.view === 'admin') { renderAdmin(); return; }
+    if (state.view === 'search') { renderSearch(); return; }
+    if (state.tab === 'files' && state.view !== 'stream') { renderFiles(); return; }
+    renderThreads();
+    watchUnread();
+  }
+
+  /** 見出しの右側のボタン（画面ごとに出すものが違う） */
+  function setHeadButtons() {
+    const v = state.view, isThreads = v !== 'admin' && v !== 'search' && state.tab !== 'files';
+    const ch = v === 'stream' || v === 'admin' || v === 'search' ? null : chById(v);
+    const role = state.res.who.member.role;
+    const canAbs = ch && ch.purpose === 'absence' && (role === '生徒' || role === '保護者' || state.res.who.member.isAdmin);
+    document.getElementById('allBtn').style.display = isThreads ? '' : 'none';
+    document.getElementById('newBtn').style.display = isThreads && state.home.channels.length ? '' : 'none';
+    document.getElementById('absBtn').style.display = isThreads && canAbs ? '' : 'none';
+    document.getElementById('searchBox').style.display = v === 'admin' ? 'none' : '';
+    if (!canAbs) state.absence = false;
+  }
+
+  function renderTabs() {
+    const el = document.getElementById('tabs');
+    if (state.view === 'stream') { el.innerHTML = ''; return; }
+    el.innerHTML = '<button class="' + (state.tab === 'threads' ? 'on' : '') + '" onclick="setTab(\'threads\')">💬 スレッド</button>' +
+      '<button class="' + (state.tab === 'files' ? 'on' : '') + '" onclick="setTab(\'files\')">📁 ファイル</button>';
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    state.composing = false;
+    if (tab === 'files') { state.files = null; loadFiles(); }
+    renderAll();
+  }
+
+  function loadFiles() {
+    const chId = state.view;
+    call('api_files', token, asId, chId).then(function (f) {
+      if (state.view !== chId || state.tab !== 'files') return;
+      state.files = f;
+      renderAll();
+    }).catch(function (e) { state.files = { error: e.message || String(e) }; renderAll(); });
+  }
+
+  function fileIcon(mime, kind) {
+    if (kind === 'folder') return '📁';
+    if (/^image\//.test(mime)) return '🖼️';
+    if (/pdf/.test(mime)) return '📕';
+    if (/spreadsheet|excel|csv/.test(mime)) return '📊';
+    if (/presentation|powerpoint/.test(mime)) return '📽️';
+    if (/document|word|text/.test(mime)) return '📄';
+    if (/^video\//.test(mime)) return '🎬';
+    return '📎';
+  }
+
+  function renderFiles() {
+    const ch = chById(state.view);
+    document.getElementById('title').textContent = '# ' + ch.name;
+    ['allBtn', 'newBtn'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const f = state.files;
+    const list = document.getElementById('list');
+    if (!f) { list.innerHTML = '<p class="note">フォルダを読み込み中…</p>'; return; }
+    if (f.error) { list.innerHTML = '<div class="card"><span class="ng">エラー</span>：' + esc(f.error) + '</div>'; return; }
+    const row = function (x) {
+      return '<tr><td><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + fileIcon(x.mime, x.kind) + ' ' + esc(x.name) + '</a></td><td>' + shortTime(x.updated) + '</td></tr>';
+    };
+    let h = '<div class="crumb">' + (f.place === 'admin' ? '先生だけの共有ドライブ' : '活動の共有ドライブ') + ' ／ <b>' + esc(f.folderName) + '</b></div>';
+    h += '<div class="fbar"><a class="btn small" href="' + esc(f.folderUrl) + '" target="_blank" rel="noopener">↗ Googleドライブで開く</a>' +
+      '<span class="note" style="margin:0">' + (f.canEdit ? '名前の変更・移動・削除は、Googleドライブで直接できます。' : '見ることができます。') + '</span></div>';
+    h += '<h3 class="fh">フォルダの中身</h3><table class="ftable"><tr><th>名前</th><th>更新</th></tr>' +
+      (f.items.map(row).join('') || '<tr><td colspan="2">まだありません</td></tr>') + '</table>';
+    h += '<h3 class="fh">チャットに添付されたファイル（「チャット添付」フォルダ）</h3><table class="ftable"><tr><th>名前</th><th>更新</th></tr>' +
+      (f.attached.map(row).join('') || '<tr><td colspan="2">まだありません</td></tr>') + '</table>';
+    if (f.permPlan) {
+      h += '<h3 class="fh">🔒 このフォルダの共有（管理者だけに表示）</h3><p class="note">' + esc(f.permPlan.note) + '</p>' +
+        '<table class="ftable"><tr><th>メンバー</th><th>権限</th><th>状態</th></tr>' +
+        (f.permPlan.rows.map(function (r) { return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.role) + '</td><td>' + esc(r.status) + '</td></tr>'; }).join('') ||
+          '<tr><td colspan="3">追加する人はいません</td></tr>') + '</table>' +
+        '<button class="btn sub small" onclick="applyPerms()">すべてのチャンネルの共有を、予定どおりに設定する</button><div id="permLog" class="note"></div>';
+    }
+    list.innerHTML = h;
+  }
+
+  function applyPerms() {
+    document.getElementById('permLog').textContent = '設定しています…';
+    call('api_applyPermissions', token, asId).then(function (log) {
+      state.files = null; loadFiles();
+      toast(log.length ? '共有を設定しました（' + log.length + '件）' : '変更はありませんでした');
+    }).catch(function (e) { toast('できませんでした：' + (e.message || e)); });
+  }
+
+  /** 本番の最初の準備（アプリの所有者だけに出る） */
+  function renderSetup(res) {
+    document.getElementById('side').style.display = 'none';
+    ['allBtn', 'newBtn', 'absBtn', 'searchBox'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const app = res.app;
+    document.getElementById('title').textContent = app.name + ' の準備';
+    const d = res.defaults;
+    const colorOpts = app.colors.map(function (c) {
+      return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="spColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
+        '><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+    }).join('');
+    document.getElementById('list').innerHTML =
+      '<div class="composer" style="max-width:760px"><b>はじめての準備（最初に1回だけ）</b>' +
+      '<p class="note">' + esc(res.owner) + ' で準備します。このアカウントが、アプリの所有者で最初の管理者になります。</p>' +
+      '<div class="row"><span class="lbl">アプリ名</span><input id="spAppName" value="' + esc(app.name) + '" maxlength="30"></div>' +
+      '<div class="row"><span class="lbl">団体名</span><input id="spOrg" value="' + esc(app.org || '') + '" maxlength="40" placeholder="例：〇〇中学校 科学部（なくてもよい）" style="flex:1"></div>' +
+      '<div class="row"><span class="lbl">色</span><span>' + colorOpts + '</span></div>' +
+      '<div class="row"><span class="lbl">活動の<br>共有ドライブ</span><input id="spClub" style="flex:1" value="' + esc(d.club) + '"></div>' +
+      '<p class="note" style="margin:2px 0 0 5.5em">チャンネルにするフォルダ（02 実験班 など）が並んでいる共有ドライブ。URLかIDを入れます。メンバーの生徒が使っている共有ドライブです。</p>' +
+      '<div class="row"><span class="lbl">先生だけの<br>共有ドライブ</span><input id="spAdmin" style="flex:1" value="' + esc(d.admin) + '"></div>' +
+      '<p class="note" style="margin:2px 0 0 5.5em">データのスプレッドシートと、生徒に見せないチャンネルのフォルダを置く、先生だけがメンバーの共有ドライブ。</p>' +
+      '<div class="row"><span class="lbl">あなたの<br>表示名</span><input id="spName" value="' + esc(d.ownerName) + '" placeholder="例：山田先生"></div>' +
+      '<p class="note">アプリ名・団体名・色は、あとで「⚙ 管理 → 🔔 通知・ログイン」で変えられます。</p>' +
+      '<div class="row"><span style="flex:1"></span><button class="btn" id="spBtn" onclick="doSetup()">準備する</button></div></div>';
+  }
+  function doSetup() {
+    const btn = document.getElementById('spBtn');
+    btn.disabled = true; btn.textContent = '準備しています…';
+    const color = document.querySelector('input[name="spColor"]:checked');
+    const settings = { name: document.getElementById('spAppName').value, org: document.getElementById('spOrg').value, color: color ? color.value : '' };
+    call('api_setupProd', token, asId, document.getElementById('spClub').value, document.getElementById('spAdmin').value, document.getElementById('spName').value, settings)
+      .then(function (r) {
+        toast('準備しました。フォルダを ' + r.channels + ' 個見つけました。「⚙ 管理 → # チャンネル」で種類を決めてください');
+        init();
+      })
+      .catch(function (e) { btn.disabled = false; btn.textContent = '準備する'; toast('できませんでした：' + (e.message || e)); });
+  }
+
+  function renderNoMember(res) {
+    document.getElementById('side').style.display = 'none';
+    ['allBtn', 'newBtn', 'absBtn', 'searchBox'].forEach(function (id) { document.getElementById(id).style.display = 'none'; });
+    const w = res.who;
+    let h = '<div class="card"><h2 style="font-size:16px;margin:0 0 8px">ようこそ</h2>';
+    if (w.email) {
+      h += '<p><span class="ng">登録されていません</span></p><p>' + esc(w.email) +
+        ' は、まだメンバーとして登録されていません。管理者の先生に、このアドレスを伝えて登録を頼んでください。</p>';
+    } else {
+      h += '<p><span class="ng">未確認</span>' + (w.error ? '：' + esc(w.error) : '') + '</p>';
+      if (res.loginUrl) h += '<p><a class="btn" href="' + esc(res.loginUrl) + '" target="_top">Googleアカウントでログイン（学校外の方）</a></p>';
+      else h += '<p class="note">学校外の方のログインは、まだ準備中です。</p>';
+    }
+    document.getElementById('list').innerHTML = h + '</div>';
+  }
+
+  function unreadOf(t) {
+    return t.posts.filter(function (p) { return !p.deleted && !p.mine && p.createdAt > t.myRead; }).length;
+  }
+
+  function renderSide() {
+    const side = document.getElementById('side');
+    side.style.display = '';
+    const me = state.res.who.member;
+    const unreadBy = {};
+    state.home.threads.forEach(function (t) { unreadBy[t.channelId] = (unreadBy[t.channelId] || 0) + unreadOf(t); });
+    const total = Object.keys(unreadBy).reduce(function (s, k) { return s + unreadBy[k]; }, 0);
+    const item = function (id, label, n, extra) {
+      return '<button class="item ' + (state.view === id ? 'active ' : '') + (n ? 'has-unread' : '') + '" onclick="go(\'' + id + '\')">' +
+        '<span>' + label + (extra || '') + '</span>' + (n ? '<span class="badge">' + n + '</span>' : '') + '</button>';
+    };
+    const app = state.res.app || { name: 'ハコチャット', org: '' };
+    let h = '<h1>' + esc(app.name) + '</h1>' + (app.org ? '<div class="me" style="padding-bottom:2px">' + esc(app.org) + '</div>' : '') + '<div class="me">' + esc(me.name) + '（' + esc(me.role) + (me.isAdmin && me.role !== '管理者' ? '・管理者' : '') + '）</div>';
+    h += item('stream', '🏠 ストリーム', total);
+    h += '<div class="sec">チャンネル</div>';
+    h += state.home.channels.map(function (c) {
+      const tag = TYPE_TAG[c.type] ? '<span class="tag t-' + c.type + '">' + TYPE_TAG[c.type] + '</span>' : '';
+      return item(c.id, '# ' + esc(c.name), unreadBy[c.id] || 0, tag);
+    }).join('');
+    if (!state.home.channels.length) h += '<div class="sec">見られるチャンネルはまだありません</div>';
+    h += '<div class="bottom">';
+    if (me.isAdmin) h += item('admin', '⚙ 管理', 0);
+    else if (me.role === '指導者') h += '<button class="item" onclick="coachNewChannel()">＋ チャンネルを作る</button>';
+    if (me.role === '保護者') h += '<button class="item" onclick="openSettings()">👤 設定（メール：' + (me.notify ? '受け取る' : '止めている') + '）</button>';
+    h += (state.res.dataUrl ? '<a href="' + esc(state.res.dataUrl) + '" target="_blank" style="display:block;padding:8px 16px 0">データのスプレッドシート</a>' : '');
+    // ほかのアプリへのリンク（部日誌アプリなど）。全員に出す
+    ((state.res.app && state.res.app.links) || []).forEach(function (l) {
+      h += '<a href="' + esc(l.url) + '" target="_blank" rel="noopener" class="item" style="text-decoration:none">🔗 ' + esc(l.name) + '</a>';
+    });
+    if (me.isAdmin && state.res.app) {
+      h += '<div style="padding:8px 16px 0;opacity:.75">版 ' + esc(state.res.app.version) + '</div>';
+      if (state.newVersion) h += '<button class="item" style="color:#ffe08a;font-weight:bold" onclick="go(\'admin\'); adminSet(\'notify\')">🆕 新しい版 ' + esc(state.newVersion.version) + ' があります（変更点を見る）</button>';
+    }
+    h += '</div>';
+    side.innerHTML = h;
+  }
+
+  function chById(id) { return state.home.channels.filter(function (c) { return c.id === id; })[0]; }
+
+  function renderThreads() {
+    const ch = state.view === 'stream' ? null : chById(state.view);
+    if (state.view !== 'stream' && !ch) { state.view = 'stream'; return renderThreads(); }
+    document.getElementById('title').textContent = ch ? '# ' + ch.name : '🏠 ストリーム（すべてのチャンネル）';
+    document.getElementById('allBtn').textContent = state.showAll ? '既読を折りたたむ' : 'すべて表示';
+
+    let ths = state.home.threads.slice();
+    if (ch) ths = ths.filter(function (t) { return t.channelId === ch.id; });
+    const rank = function (t) { return t.pinned ? 0 : t.myPin ? 1 : 2; };
+    ths.sort(function (a, b) { return rank(a) - rank(b) || (a.updatedAt < b.updatedAt ? 1 : -1); });
+
+    let h = '';
+    if (state.absence && ch) h += absenceFormHtml(ch);
+    if (state.composing) h += composerHtml(ch);
+    h += '<div class="note">📌＝全員へのピン止め、🔖＝自分のピン。その次に、新しい返信があったスレッドが上に来ます。既読の返信は折りたたまれます。</div>';
+    h += ths.map(threadHtml).join('') || '<div class="note">スレッドはまだありません。「＋ 新しいスレッド」から書き込めます。</div>';
+    document.getElementById('list').innerHTML = h;
+  }
+
+  function composerHtml(ch) {
+    const opts = state.home.channels.map(function (c) {
+      return '<option value="' + c.id + '"' + ((ch ? ch.id : state.drafts._ch) === c.id ? ' selected' : '') + '># ' + esc(c.name) + '</option>';
+    }).join('');
+    return '<div class="composer"><b>新しいスレッド</b>' +
+      '<div class="row"><span>チャンネル：</span><select id="newCh" onchange="changeNewCh(this.value)">' + opts + '</select></div>' +
+      '<textarea id="newText" placeholder="本文を入力（Ctrl＋Enterでも投稿できます）" oninput="state.drafts._new=this.value" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey))newThread()">' + esc(state.drafts._new || '') + '</textarea>' +
+      chipsHtml('_new') +
+      '<div class="row"><button class="attach-btn" title="ファイルを添付" onclick="pickFiles(\'_new\')">' + CLIP_SVG + '<span>ファイルを添付</span></button><span style="flex:1"></span><button class="btn sub small" onclick="state.composing=false; renderThreads()">やめる</button>' +
+      '<button class="btn small" onclick="newThread()">投稿する</button></div></div>';
+  }
+
+  function threadHtml(t) {
+    const ch = chById(t.channelId);
+    const read = state.snap[t.id] || '';
+    const first = t.posts[0], replies = t.posts.slice(1);
+    const wasRead = function (p) { return p.mine || p.deleted || p.createdAt <= read; };
+    const readReplies = replies.filter(wasRead);
+    const unreadReplies = replies.filter(function (p) { return !wasRead(p); });
+    const of = state.openFolds[t.id];
+    const canFold = readReplies.length > 0;
+    const fold = canFold && (of === 'closed' || (!state.showAll && of !== true));
+    const n = unreadOf(t);
+    const me = state.res.who.member;
+
+    let h = '<div class="thread ' + (t.pinned ? 'pinned ' : '') + (n ? 'has-new' : '') + '" data-tid="' + t.id + '"' + (n ? ' data-unread="1"' : '') + '>';
+    h += '<div class="t-top">' + (state.view === 'stream' ? '<span class="chtag"># ' + esc(ch.name) + '</span>' : '') +
+      (t.pinned ? '<span class="pintag">📌 全員にピン止め</span>' : '') +
+      (t.myPin ? '<span class="pintag" style="color:var(--accent)">🔖 自分のピン</span>' : '') +
+      (n ? '<span style="color:var(--unread)">新着 ' + n + '件</span>' : '') + '</div>';
+    h += postHtml(t, first, false);
+    if (fold) {
+      h += '<button class="fold" onclick="setFold(\'' + t.id + '\', true)">▸ 既読の返信 ' + readReplies.length + '件を表示</button>';
+      h += unreadReplies.map(function (p) { return postHtml(t, p, true); }).join('');
+    } else {
+      if (canFold) h += '<button class="fold" onclick="setFold(\'' + t.id + '\', \'closed\')">▾ 既読の返信を折りたたむ</button>';
+      h += replies.map(function (p) { return postHtml(t, p, true); }).join('');
+    }
+    // 新しいスレッドの記録が終わるまでは、返信やピン止めはできない
+    if (t.pending) return h + '</div>';
+    h += chipsHtml(t.id);
+    h += '<div class="replybox"><textarea rows="1" id="rb-' + t.id + '" placeholder="返信を書く…（Ctrl＋Enterでも送信）" ' +
+      'oninput="state.drafts[\'' + t.id + '\']=this.value; grow(this)" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey))reply(\'' + t.id + '\')">' +
+      esc(state.drafts[t.id] || '') + '</textarea><button class="attach-btn" title="ファイルを添付" onclick="pickFiles(\'' + t.id + '\')">' + CLIP_SVG + '<span>添付</span></button>' +
+      '<button class="btn small" onclick="reply(\'' + t.id + '\')">送信</button></div>';
+    h += '<div class="t-tools"><button onclick="toggleMyPin(\'' + t.id + '\')">' + (t.myPin ? '🔖 自分のピンを外す' : '🔖 自分だけピン止め') + '</button>' +
+      (me.isAdmin ? '<button onclick="togglePin(\'' + t.id + '\')">' + (t.pinned ? '📌 全員へのピン止めを外す' : '📌 全員にピン止め') + '</button>' : '') + '</div>';
+    return h + '</div>';
+  }
+
+  function postHtml(t, p, isReply) {
+    const me = state.res.who.member;
+    const head = function (isNew) {
+      return '<div class="avatar" style="background:' + color(p.author.id || p.author.name) + '">' + esc(p.author.name.charAt(0)) + '</div><div class="body">' +
+        '<div><span class="name">' + esc(p.author.name) + '</span>' + (p.author.role ? '<span class="role">' + esc(p.author.role) + '</span>' : '') +
+        '<span class="time">' + shortTime(p.createdAt) + (p.editedAt ? '（編集済み）' : '') + '</span>' + (isNew ? '<span class="newmark">新着</span>' : '') + '</div>';
+    };
+    if (p.deleted) {
+      return '<div class="post ' + (isReply ? 'reply' : '') + '">' + head(false) + '<div class="text deleted">（この投稿は削除されました）</div></div></div>';
+    }
+    const isNew = !p.mine && p.createdAt > t.myRead;
+    let h = '<div class="post ' + (isReply ? 'reply ' : '') + (isNew ? 'new' : '') + '">' + head(isNew);
+    if (state.editing === p.id) {
+      h += '<textarea class="edit" id="ed-' + p.id + '" oninput="state.drafts[\'ed-' + p.id + '\']=this.value">' + esc(state.drafts['ed-' + p.id] != null ? state.drafts['ed-' + p.id] : p.body) + '</textarea>' +
+        '<div class="acts"><button class="btn small" onclick="saveEdit(\'' + p.id + '\')">保存</button><button class="btn sub small" onclick="cancelEdit()">やめる</button></div>';
+      return h + '</div></div>';
+    }
+    if (p.body) h += '<div class="text">' + linkify(p.body) + '</div>';
+    // 先生・指導者へのメモ（サーバーは、先生と指導者にだけ中身を渡している）
+    if (p.abs && p.abs.note) h += '<div class="abs-private">🔒 ' + (p.mine ? 'あなたが書いた先生・指導者へのメモ（ほかの方には見えません）' : '先生・指導者だけに表示') + '：<span>' + esc(p.abs.note) + '</span></div>';
+    if (p.files && p.files.length) {
+      h += '<div class="files">' + p.files.map(function (f) {
+        if (/^image\//.test(f.mime)) {
+          // 写真は小さな見本を出す（表示できないときは、ふつうのファイルの表示に切り替える）
+          return '<a class="thumb" href="' + esc(f.url) + '" target="_blank" rel="noopener" title="' + esc(f.name) + '">' +
+            '<img src="https://drive.google.com/thumbnail?id=' + encodeURIComponent(f.id) + '&sz=w440" alt="' + esc(f.name) + '" onerror="thumbFail(this)"></a>';
+        }
+        return '<a class="file" href="' + esc(f.url) + '" target="_blank" rel="noopener">' + fileIcon(f.mime) + ' <span>' + esc(f.name) + '</span></a>';
+      }).join('') + '</div>';
+    }
+    // 送信中（記録が終わるまで）は、スタンプや編集はまだできない
+    if (p.pending) return h + '<div class="acts"><span class="sending">送信中…</span></div></div></div>';
+    const react = function (k, icon, label) {
+      const r = p.reactions[k];
+      return '<button class="react ' + (r.mine ? 'on' : '') + '" title="' + label + '：' + esc(r.names.join('、') || 'まだいません') + '" onclick="react(\'' + p.id + '\', \'' + k + '\')">' + icon + ' ' + (r.n || '') + '</button>';
+    };
+    h += '<div class="acts">' + react('see', '👀', '見ました') + react('like', '👍', 'いいね') + react('no', '🙅', '反対');
+    if (p.mine) h += '<button class="mini" onclick="startEdit(\'' + p.id + '\')">編集</button>';
+    if (p.mine || me.isAdmin) h += '<button class="mini" onclick="removePost(\'' + p.id + '\')">削除</button>';
+    // 保護者には名前が届かない（GASの通信では「なし」の印が消えることがあるので、名前の一覧があるかどうかで判断する）
+    if (!Array.isArray(p.readers.names)) {
+      h += '<span class="readers">既読 ' + p.readers.n + '人</span>';
+    } else {
+      h += '<button class="readers clickable" onclick="togglePop(\'' + p.id + '\', event)">既読 ' + p.readers.n + '人</button>';
+      if (state.pop === p.id) h += '<div class="pop"><b>読んだ人（' + p.readers.n + '人）</b>' + (p.readers.names.map(esc).join('<br>') || 'まだいません') + '</div>';
+    }
+    return h + '</div></div></div>';
+  }
+
+  function renderDevbar(res) {
+    const bar = document.getElementById('devbar');
+    if (!res.devMembers) { bar.style.display = 'none'; return; }
+    if (bar.dataset.done) return;
+    const opts = ['<option value="">管理者（はじめの画面）</option>'].concat(res.devMembers.map(function (m) {
+      return '<option value="' + esc(m.id) + '"' + (m.id === asId ? ' selected' : '') + '>' + esc(m.name) + '（' + esc(m.role) + '）</option>';
+    })).join('');
+    bar.innerHTML = '<b>体験版</b><span>だれの画面で見るか：</span><select id="asSel">' + opts + '</select><span class="note" style="margin:0">データはすべて見本で、外部に送りません。閉じると元に戻ります。</span>';
+    bar.style.display = 'flex';
+    bar.dataset.done = '1';
+    document.getElementById('asSel').onchange = function () { asId = this.value; store.set('tsc_as', asId); init(); };
+  }
+
+  // ===== 既読：画面に表示されたスレッドを、少し待ってから既読にする =====
+  let observer = null, readQueue = {}, readTimer = null;
+  function watchUnread() {
+    if (observer) observer.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    const timers = {};
+    // 「よく見えている」＝スレッドの半分以上が見えている、または画面の高さの半分以上をスレッドが占めている
+    // （画面より縦に長いスレッドでも、既読になるように）
+    observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        const id = en.target.dataset.tid;
+        const viewH = (en.rootBounds && en.rootBounds.height) || window.innerHeight;
+        const seen = en.isIntersecting && (en.intersectionRatio >= 0.5 || en.intersectionRect.height >= viewH * 0.5);
+        if (seen) {
+          if (!timers[id]) timers[id] = setTimeout(function () { queueRead(id); }, READ_DELAY_MS);
+        } else {
+          clearTimeout(timers[id]);
+          delete timers[id];
+        }
+      });
+    }, { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] });
+    document.querySelectorAll('.thread[data-unread]').forEach(function (el) { observer.observe(el); });
+  }
+  function queueRead(id) {
+    readQueue[id] = true;
+    clearTimeout(readTimer);
+    readTimer = setTimeout(function () {
+      const ids = Object.keys(readQueue);
+      readQueue = {};
+      if (!ids.length) return;
+      call('api_markRead', token, asId, ids).then(function (r) {
+        state.home.threads.forEach(function (t) { if (ids.indexOf(t.id) >= 0 && r.readAt > t.myRead) t.myRead = r.readAt; });
+        renderSoon();
+      }).catch(function () {});
+    }, 800);
+  }
+
+  // ===== 操作 =====
+  function go(view) {
+    state.view = view;
+    state.tab = 'threads';
+    state.composing = false;
+    state.absence = false;
+    if (view === 'admin') { state.admin = null; state.notify = null; state.previewIdx = null; } // 管理画面は開くたびに読み直す
+    takeSnap();
+    document.getElementById('side').classList.remove('open');
+    renderAll();
+  }
+  function toggleSide() { document.getElementById('side').classList.toggle('open'); }
+  function toggleAll() { state.showAll = !state.showAll; state.openFolds = {}; renderThreads(); watchUnread(); }
+  function setFold(id, v) { state.openFolds[id] = v; renderThreads(); watchUnread(); }
+  function togglePop(id, ev) { ev.stopPropagation(); state.pop = state.pop === id ? null : id; renderThreads(); }
+  document.addEventListener('click', function (e) {
+    if (state.pop && !e.target.closest('.pop, .readers')) { state.pop = null; renderThreads(); }
+  });
+  function grow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 240) + 'px'; }
+
+  function openComposer() {
+    state.composing = !state.composing;
+    renderThreads();
+    if (state.composing) { const el = document.getElementById('newText'); if (el) el.focus(); }
+  }
+  // ===== ファイルの添付：選んだらすぐにアップロードし、投稿するときにまとめて付ける =====
+  function thumbFail(img) {
+    const a = img.parentNode;
+    a.className = 'file';
+    a.innerHTML = '🖼️ <span>' + esc(a.title) + '</span>';
+  }
+  function chipsHtml(key) {
+    const list = state.attach[key] || [];
+    if (!list.length) return '';
+    const done = list.every(function (f) { return !f.uploading; });
+    return '<div class="chips">' + list.map(function (f, i) {
+      return '<span class="chip ' + (f.uploading ? 'up' : '') + '">' + fileIcon(f.mime) + ' ' + esc(f.name) +
+        (f.uploading ? '（アップロード中…）' : '<button title="外す" onclick="removeAttach(\'' + key + '\', ' + i + ')">×</button>') + '</span>';
+    }).join('') + '<span class="note" style="margin:0;align-self:center">' +
+      (done ? '← まだ投稿されていません。「' + (key === '_new' ? '投稿する' : '送信') + '」を押すと、このファイル付きで投稿されます' : 'アップロードが終わるまで待ってください') +
+      '</span></div>';
+  }
+  function channelForKey(key) {
+    if (key === '_new') return document.getElementById('newCh').value;
+    const t = state.home.threads.filter(function (x) { return x.id === key; })[0];
+    return t ? t.channelId : '';
+  }
+  function pickFiles(key) {
+    const input = document.getElementById('filePicker');
+    input.value = '';
+    input.onchange = function () { Array.prototype.forEach.call(input.files, function (f) { uploadFile(key, f); }); };
+    input.click();
+  }
+  function uploadFile(key, file) {
+    if (file.size > MAX_FILE_BYTES) { toast('「' + file.name + '」は大きすぎます（1つ20MBまで）'); return; }
+    const chId = channelForKey(key);
+    if (key === '_new') state.attach._newCh = chId;
+    const list = state.attach[key] = state.attach[key] || [];
+    const item = { name: file.name, mime: file.type, uploading: true };
+    list.push(item);
+    renderAttach(key);
+    const reader = new FileReader();
+    reader.onload = function () {
+      const base64 = String(reader.result).split(',')[1] || '';
+      call('api_upload', token, asId, chId, file.name, file.type, base64).then(function (r) {
+        Object.assign(item, r, { uploading: false });
+        renderAttach(key);
+      }).catch(function (e) {
+        list.splice(list.indexOf(item), 1);
+        renderAttach(key);
+        toast('アップロードできませんでした：' + (e.message || e));
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+  function renderAttach(key) {
+    // 入力中の文字を消さないよう、添付の表示のところだけを描き直す
+    const box = key === '_new' ? document.querySelector('.composer') : document.querySelector('.thread[data-tid="' + key + '"]');
+    if (!box) return;
+    const old = box.querySelector('.chips');
+    const html = chipsHtml(key);
+    if (old) old.outerHTML = html || '<span></span>';
+    else if (html) {
+      const anchor = key === '_new' ? box.querySelector('textarea') : box.querySelector('.replybox');
+      anchor.insertAdjacentHTML(key === '_new' ? 'afterend' : 'beforebegin', html);
+    }
+  }
+  function removeAttach(key, i) {
+    const list = state.attach[key] || [];
+    const f = list.splice(i, 1)[0];
+    renderAttach(key);
+    // 投稿しなかったファイルは、「チャット添付」フォルダに残らないようにゴミ箱へ移す
+    if (f && f.id) call('api_discardUpload', token, asId, channelForKey(key), f.id).catch(function () {});
+  }
+  function changeNewCh(v) {
+    state.drafts._ch = v;
+    if ((state.attach._new || []).length) {
+      const oldCh = state.attach._newCh;
+      state.attach._new.forEach(function (f) { if (f.id && oldCh) call('api_discardUpload', token, asId, oldCh, f.id).catch(function () {}); });
+      state.attach._new = [];
+      renderAttach('_new');
+      toast('チャンネルを変えたので、添付したファイルを外しました。もう一度添付してください');
+    }
+  }
+  function readyFiles(key) {
+    const list = state.attach[key] || [];
+    if (list.some(function (f) { return f.uploading; })) { toast('ファイルのアップロードが終わるまで待ってください'); return null; }
+    return list.map(function (f) { return { id: f.id, name: f.name, mime: f.mime }; });
+  }
+
+  // ===== 投稿と返信：押した瞬間に「送信中…」で表示し、記録は裏で行う =====
+  function localNow() {
+    const d = new Date(), p = function (n, w) { return String(n).padStart(w || 2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3);
+  }
+  function tempPost(text, files) {
+    const me = state.res.who.member;
+    const rx = {}; ['see', 'like', 'no'].forEach(function (k) { rx[k] = { n: 0, mine: false, names: [] }; });
+    return {
+      id: 'tmp_' + Date.now() + Math.random().toString(36).slice(2, 6), pending: true, createdAt: localNow(), body: text, mine: true,
+      author: { id: me.id, name: me.name, role: me.role },
+      files: files.map(function (f) { return { id: f.id, name: f.name, mime: f.mime, url: 'https://drive.google.com/file/d/' + f.id + '/view' }; }),
+      reactions: rx, readers: { n: 0, names: me.role === '保護者' ? null : [], me: false }, abs: null
+    };
+  }
+  /** 裏で記録する（記録の途中は、新着の確認で古いデータに戻らないように休む） */
+  function sendInBackground(fn, args, onOk, onFail) {
+    state.pendingOps = (state.pendingOps || 0) + 1;
+    return call.apply(null, [fn, token, asId].concat(args)).then(onOk).catch(function (e) {
+      onFail();
+      toast('送れませんでした：' + (e.message || e) + '（書いた文は元に戻しました）');
+    }).finally(function () { state.pendingOps--; renderSoon(); });
+  }
+  function newThread() {
+    const text = (document.getElementById('newText').value || '').trim();
+    const chId = document.getElementById('newCh').value;
+    const files = readyFiles('_new');
+    if (!files) return;
+    if (!text && !files.length) { toast('本文を入力するか、ファイルを添付してください'); return; }
+    const p = tempPost(text, files);
+    const t = { id: 'tmp_t' + Date.now(), channelId: chId, pinned: false, myPin: false, updatedAt: p.createdAt, myRead: p.createdAt, posts: [p], pending: true };
+    const saved = { text: state.drafts._new, attach: state.attach._new };
+    state.home.threads.push(t);
+    state.drafts._new = ''; state.attach._new = []; state.composing = false;
+    renderAll();
+    sendInBackground('api_newThread', [chId, text, files], function (r) {
+      t.id = r.threadId; t.pending = false; t.updatedAt = r.createdAt; t.myRead = r.createdAt;
+      p.id = r.postId; p.pending = false; p.createdAt = r.createdAt; p.files = r.files;
+    }, function () {
+      state.home.threads.splice(state.home.threads.indexOf(t), 1);
+      state.drafts._new = saved.text; state.attach._new = saved.attach; state.composing = true;
+      renderAll();
+    });
+  }
+  function reply(tid) {
+    const el = document.getElementById('rb-' + tid);
+    const text = (el.value || '').trim();
+    const files = readyFiles(tid);
+    if (!files) return;
+    if (!text && !files.length) return;
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const p = tempPost(text, files);
+    const saved = { text: state.drafts[tid], attach: state.attach[tid], updatedAt: t.updatedAt };
+    t.posts.push(p);
+    t.updatedAt = p.createdAt;
+    state.drafts[tid] = ''; state.attach[tid] = [];
+    state.openFolds[tid] = true; // 自分の返信が折りたたまれて見えなくならないように、このスレッドは開いておく
+    el.value = ''; el.blur();
+    renderAll();
+    sendInBackground('api_reply', [tid, text, files], function (r) {
+      p.id = r.postId; p.pending = false; p.createdAt = r.createdAt; p.files = r.files;
+      t.updatedAt = r.createdAt; if (r.createdAt > t.myRead) t.myRead = r.createdAt;
+    }, function () {
+      t.posts.splice(t.posts.indexOf(p), 1);
+      t.updatedAt = saved.updatedAt;
+      state.drafts[tid] = saved.text; state.attach[tid] = saved.attach;
+      renderAll();
+    });
+  }
+  // ===== 反応と自分のピン：押した瞬間に画面を変え、記録は裏で行う =====
+  // 同じ反応への記録は1つずつ順番に送る（すばやく何度押しても、最後の状態が記録される）。
+  // 記録の途中は、新着の確認で古いデータに戻らないように、新着の確認を休む。
+  const chains = {};
+  function saveInBackground(key, fn, args, undo) {
+    state.pendingOps = (state.pendingOps || 0) + 1;
+    chains[key] = (chains[key] || Promise.resolve()).then(function () {
+      return call.apply(null, [fn, token, asId].concat(args));
+    }).catch(function (e) {
+      undo();
+      renderThreads();
+      toast('記録できませんでした：' + (e.message || e));
+    }).finally(function () {
+      state.pendingOps--;
+    });
+  }
+  function findPost(pid) {
+    for (const t of state.home.threads) for (const p of t.posts) if (p.id === pid) return p;
+    return null;
+  }
+  function react(pid, kind) {
+    const p = findPost(pid);
+    if (!p) return;
+    const r = p.reactions[kind], myName = state.res.who.member.name;
+    const flip = function () {
+      r.mine = !r.mine;
+      r.n += r.mine ? 1 : -1;
+      r.names = r.mine ? r.names.concat([myName]) : r.names.filter(function (n) { return n !== myName; });
+    };
+    flip();
+    // スタンプを押した人は既読として数える（ほかの人の投稿のとき）
+    if (r.mine && !p.mine && !p.readers.me) {
+      p.readers.me = true;
+      p.readers.n += 1;
+      if (p.readers.names) p.readers.names = p.readers.names.concat([myName]);
+    }
+    renderThreads();
+    saveInBackground('rx:' + pid + ':' + kind, 'api_react', [pid, kind, r.mine], flip);
+  }
+  function toggleMyPin(tid) {
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const flip = function () { t.myPin = !t.myPin; };
+    flip();
+    renderThreads();
+    toast(t.myPin ? '自分だけピン止めしました（ほかの人には見えません）' : '自分のピンを外しました');
+    saveInBackground('pin:' + tid, 'api_setMyPin', [tid, t.myPin], flip);
+  }
+  function togglePin(tid) {
+    const t = state.home.threads.filter(function (x) { return x.id === tid; })[0];
+    if (!t) return;
+    const flip = function () { t.pinned = !t.pinned; };
+    flip();
+    renderThreads();
+    saveInBackground('gpin:' + tid, 'api_setPin', [tid, t.pinned], flip);
+  }
+  function startEdit(pid) { state.editing = pid; delete state.drafts['ed-' + pid]; renderThreads(); const el = document.getElementById('ed-' + pid); if (el) el.focus(); }
+  function cancelEdit() { state.editing = null; renderThreads(); }
+  function saveEdit(pid) {
+    const text = (document.getElementById('ed-' + pid).value || '').trim();
+    if (!text) { toast('本文を入力してください'); return; }
+    const p = findPost(pid);
+    const old = { body: p.body, editedAt: p.editedAt };
+    p.body = text; p.editedAt = localNow();
+    state.editing = null; delete state.drafts['ed-' + pid];
+    renderAll();
+    sendInBackground('api_editPost', [pid, text], function (r) { p.editedAt = r.editedAt; }, function () {
+      p.body = old.body; p.editedAt = old.editedAt; renderAll();
+    });
+  }
+  function removePost(pid) {
+    if (!confirm('この投稿を削除しますか？（削除したことは、ほかの人にも表示されます）')) return;
+    const p = findPost(pid);
+    p.deleted = true;
+    renderAll();
+    sendInBackground('api_deletePost', [pid], function () { toast('削除しました'); }, function () { p.deleted = false; renderAll(); });
+  }
+
+  init();
+</script>
+  <script>
+  // ===== 管理画面・欠席連絡・検索（app.html の続き） =====
+  const TYPE_NAMES = [['all', '生徒全員'], ['members', '限定メンバー'], ['public', '保護者にも公開'], ['parents', '保護者のみ'], ['off', 'チャンネルにしない']];
+  const ROLES = ['生徒', '指導者', '保護者', '管理者'];
+  // 区分ごとにできること（メンバーの追加・編集のときに表示する）
+  const ROLE_DESC = {
+    '生徒': ['見られるチャンネル：「生徒全員」「保護者にも公開」と、参加している「限定メンバー」のチャンネル', '「保護者のみ」のチャンネルは見られない', '投稿・返信・スタンプ・自分の欠席連絡ができる', '学校のアカウントなら、ログインは自動'],
+    '指導者': ['見られるチャンネル：すべて（先生と同じ）', '投稿・返信・スタンプに加えて、チャンネルを作れる', '学校外の人は、チャンネルのフォルダに「コンテンツ管理者」として自動で追加される', '「アプリの管理者にする」と、メンバーの登録やチャンネルの設定もできる'],
+    '保護者': ['見られるチャンネル：「保護者にも公開」「保護者のみ」だけ', '投稿・返信・スタンプと、子どもの欠席連絡ができる', '既読は人数だけが見える（だれが読んだかは見えない）', 'フォルダは見るだけ（閲覧者）。新しい投稿を1日1回メールで受け取れる'],
+    '管理者': ['見られるチャンネル：すべて', 'メンバーの登録、チャンネルの種類の設定、全員へのピン止め、ほかの人の投稿の削除ができる', '管理者の先生向けの区分']
+  };
+  state.admin = null; state.adminTab = 'members'; state.editMember = null; state.editChMembers = null; state.newCh = false;
+  state.search = null;
+
+  // ----- 管理画面 -----
+  function loadAdmin() {
+    return call('api_admin', token, asId).then(function (a) { state.admin = a; if (state.view === 'admin') renderAll(); })
+      .catch(function (e) { toast('読み込めませんでした：' + (e.message || e)); });
+  }
+  function adminSet(tab) {
+    state.adminTab = tab; state.editMember = null; state.editChMembers = null; state.newCh = false; state.bulk = null; state.delSel = {};
+    if (tab === 'notify') { state.notify = null; state.previewIdx = null; state.showSecret = false; }
+    renderAdmin();
+  }
+  /** 管理の操作のあとは、チャンネルの一覧なども新しくする */
+  function afterAdmin(res) {
+    if (res && res.log && res.log.length) toast('フォルダの共有を更新しました（' + res.log.length + '件）');
+    return Promise.all([loadAdmin(), call('api_home', token, asId).then(function (h) { state.home = h; })]).then(renderAll);
+  }
+
+  function renderAdmin() {
+    document.getElementById('title').textContent = '⚙ 管理';
+    const a = state.admin;
+    const list = document.getElementById('list');
+    if (!a) { list.innerHTML = '<p class="note">読み込み中…</p>'; loadAdmin(); return; }
+    const tab = function (k, label) { return '<button class="' + (state.adminTab === k ? 'on' : '') + '" onclick="adminSet(\'' + k + '\')">' + label + '</button>'; };
+    document.getElementById('tabs').innerHTML = tab('members', '👥 メンバー') + tab('channels', '# チャンネル') + tab('absences', '📝 欠席連絡の一覧') + tab('notify', '🔔 通知・ログイン');
+    if (state.adminTab === 'members') list.innerHTML = membersHtml(a);
+    else if (state.adminTab === 'channels') list.innerHTML = channelsHtml(a);
+    else if (state.adminTab === 'notify') list.innerHTML = notifyHtml();
+    else list.innerHTML = absencesHtml(a);
+  }
+
+  // ----- 通知・ログイン -----
+  state.notify = null; state.login = null; state.showSecret = false;
+  function loadNotify() {
+    call('api_notifyInfo', token, asId).then(function (n) { state.notify = n; renderAdmin(); }).catch(function (e) { toast(e.message || e); });
+    if (state.res.who.isOwner) call('api_loginSettings', token, asId).then(function (l) { state.login = l; renderAdmin(); }).catch(function () {});
+  }
+  // ----- アプリの表示（アプリ名・団体名・色） -----
+  function appSettingsHtml() {
+    const app = state.res.app;
+    if (!app) return '';
+    const colors = app.colors.map(function (c) {
+      return '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="radio" name="asColor" value="' + c.id + '"' + (c.id === app.color ? ' checked' : '') +
+        ' onchange="previewColor(this.value)"><span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:' + c.side + '"></span>' + esc(c.name) + '</label>';
+    }).join('');
+    const links = (app.links || []).slice();
+    while (links.length < 3) links.push({ name: '', url: '' });
+    const linkRows = links.map(function (l, i) {
+      return '<div class="fbar"><span style="width:4.5em">' + (i ? '' : 'リンク') + '</span><input class="search asLinkName" style="width:140px;border-radius:6px" maxlength="20" placeholder="名前（例：部日誌）" value="' + esc(l.name) + '">' +
+        '<input class="search asLinkUrl" style="width:340px;max-width:100%;border-radius:6px" placeholder="https://…" value="' + esc(l.url) + '"></div>';
+    }).join('');
+    return newVersionHtml() + '<h3 class="fh">🎨 アプリの表示</h3>' +
+      '<div class="fbar"><span style="width:4.5em">アプリ名</span><input id="asName" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="30" value="' + esc(app.name) + '"></div>' +
+      '<div class="fbar"><span style="width:4.5em">団体名</span><input id="asOrg" class="search" style="width:260px;max-width:100%;border-radius:6px" maxlength="40" placeholder="なくてもよい" value="' + esc(app.org || '') + '"></div>' +
+      '<div class="fbar"><span>色</span><span>' + colors + '</span></div>' +
+      linkRows + '<div class="fbar"><span style="width:4.5em"></span><button class="btn sub small" onclick="connectNisshi()">📔 ハコ日誌とつなぐ</button>' +
+      '<span class="note" style="margin:0">ハコ日誌のURLを貼るだけで、行き来できるリンクを作ります</span></div>' +
+      '<p class="note" style="margin:0 0 8px">リンクは、左の一覧の下に「🔗 名前」で出ます（全員に見えます）。いっしょに使うアプリのURLを入れて「保存」を押します。</p>' +
+      '<div class="fbar"><button class="btn small" onclick="saveAppSettings()">保存</button><span class="note" style="margin:0">版 ' + esc(app.version) + '</span></div>';
+  }
+  /**
+   * ハコ日誌とつなぐ：ハコ日誌のURLに「戻る」の行き先（このアプリのURLと名前）を付けて、リンクの欄に入れる
+   * ハコ日誌は、URLの back と backLabel を見て、左上に「← （このアプリ）に戻る」を出す
+   */
+  function connectNisshi() {
+    const app = state.res.app;
+    const raw = prompt('ハコ日誌のURLを貼り付けてください。\n（ハコ日誌を公開したときの「ウェブアプリのURL」。https://script.google.com/…/exec の形）');
+    if (raw == null) return;
+    const base = String(raw).trim().split('?')[0];
+    if (!/^https:\/\/script\.google\.com\/[^\s"'<>]+\/exec$/.test(base)) { toast('URLの形が違います。…/exec で終わるURLを貼ってください'); return; }
+    const url = base + '?back=' + encodeURIComponent(app.url || '') + '&backLabel=' + encodeURIComponent(app.name + 'に戻る');
+    const names = document.querySelectorAll('.asLinkName'), urls = document.querySelectorAll('.asLinkUrl');
+    let i = Array.prototype.findIndex.call(names, function (n) { return n.value.trim() === 'ハコ日誌'; });
+    if (i < 0) i = Array.prototype.findIndex.call(names, function (n, k) { return !n.value.trim() && !urls[k].value.trim(); });
+    if (i < 0) { toast('リンクの欄があいていません。使わないリンクを消してから、もう一度押してください'); return; }
+    names[i].value = 'ハコ日誌';
+    urls[i].value = url;
+    toast('リンクの欄に入れました。「保存」を押すと、左の一覧の下に「🔗 ハコ日誌」が出ます');
+  }
+
+  function previewColor(id) { applyApp(Object.assign({}, state.res.app, { color: id })); }
+  function saveAppSettings() {
+    const color = document.querySelector('input[name="asColor"]:checked');
+    const names = document.querySelectorAll('.asLinkName'), urls = document.querySelectorAll('.asLinkUrl');
+    const links = Array.prototype.map.call(names, function (n, i) { return { name: n.value, url: urls[i].value }; });
+    const s = { name: document.getElementById('asName').value, org: document.getElementById('asOrg').value, color: color ? color.value : '', links: links };
+    act0('api_setAppSettings', s).then(function (app) {
+      if (!app) { applyApp(state.res.app); return; }
+      state.res.app = app; applyApp(app); renderSide(); toast('アプリの表示を保存しました');
+    });
+  }
+
+  function notifyHtml() {
+    const n = state.notify;
+    if (!n) { loadNotify(); return '<p class="note">読み込み中…</p>'; }
+    let h = appSettingsHtml();
+    h += '<h3 class="fh">🔔 保護者へのメール通知（1日1回まとめて）</h3>';
+    h += '<div class="fbar"><span>毎日</span><select id="ntHour">' + Array.from({ length: 24 }, function (_, i) {
+      return '<option value="' + i + '"' + (i === n.hour ? ' selected' : '') + '>' + i + '時</option>';
+    }).join('') + '</select><span>ごろに送る</span>' +
+      '<button class="btn small" onclick="setSchedule(document.getElementById(\'ntHour\').value)">' + (n.scheduled ? '時刻を変える' : '毎日の通知を始める') + '</button>' +
+      (n.scheduled ? '<button class="btn sub small" onclick="setSchedule(-1)">通知を止める</button>' : '') +
+      '<span class="note" style="margin:0">' + (n.scheduled ? '✅ 毎日' + n.hour + '時ごろに送ります' : '⏸ まだ始めていません') + '</span></div>';
+    h += '<p class="note">新しい投稿がない日は送りません。先生・指導者へのメモ（欠席連絡）は、メールには載せません。' +
+      (n.lastRun ? '<br>前回：' + esc(n.lastRun) : '') + '</p>';
+    h += '<div class="fbar"><button class="btn sub small" onclick="sendNow()">今すぐ送る（試すとき）</button><span class="note" style="margin:0">毎日の時刻を待たずに、いま送ります</span></div>';
+    h += '<h3 class="fh">次に送る内容（保護者ごと）</h3>';
+    h += '<div class="fbar"><span>見本の送り先</span><input id="testTo" class="search" style="width:300px;border-radius:6px" value="' + esc(n.testTo || '') + '" placeholder="見本を受け取るあなたのメールアドレス">' +
+      '<span class="note" style="margin:0">「見本を送る」で、ここに［見本］のメールを送ります</span></div>';
+    h += '<table class="ftable"><tr><th>保護者</th><th>送り先</th><th>通知</th><th>新しい投稿</th><th></th></tr>' +
+      (n.previews.map(function (p, i) {
+        return '<tr><td>' + esc(p.name) + (p.dummy ? '<br><small class="note">体験版の見本（実際には送らない）</small>' : '') + '</td><td style="word-break:break-all">' + esc(p.to) + '</td><td>' + (p.notify ? '受け取る' : '止めている') + '</td><td>' + (p.count ? p.count + '件' : '—') + '</td><td>' +
+          (p.count ? '<button class="btn sub small" onclick="state.previewIdx=' + i + '; renderAdmin()">内容を見る</button> <button class="btn sub small" onclick="sendTest(' + i + ')">見本を送る</button>' : '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="5">保護者がまだ登録されていません</td></tr>') + '</table>';
+    if (state.previewIdx != null && n.previews[state.previewIdx] && n.previews[state.previewIdx].count) {
+      const p = n.previews[state.previewIdx];
+      h += '<div class="card" style="max-width:none"><b>件名：</b>' + esc(p.subject) + '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px">' + esc(p.body) + '</pre></div>';
+    }
+    if (state.res.who.isOwner) h += loginSettingsHtml();
+    return h;
+  }
+  function setSchedule(hour) {
+    act0('api_setNotifySchedule', Number(hour)).then(function (n) { if (n) { state.notify = n; toast(Number(hour) < 0 ? '毎日の通知を止めました' : '毎日' + hour + '時ごろに送ります'); renderAdmin(); } });
+  }
+  function sendNow() {
+    if (!confirm('いま、保護者へのお知らせメールを送ります。よろしいですか？')) return;
+    act0('api_sendDigestNow').then(function (log) { if (log) { toast(log.length ? log.join('／') : '送る相手はいませんでした'); state.notify = null; renderAdmin(); } });
+  }
+  function sendTest(i) {
+    const p = state.notify.previews[i];
+    const to = document.getElementById('testTo').value.trim();
+    if (!to) { toast('「見本の送り先」に、あなたのメールアドレスを入れてください'); return; }
+    act0('api_sendTestDigest', p.id, to).then(function (r) { if (r) { state.notify.testTo = r.to; toast('見本を ' + r.to + ' に送りました'); } });
+  }
+
+  function loginSettingsHtml() {
+    const l = state.login;
+    if (!l) return '';
+    let h = '<h3 class="fh">🔑 学校外の人のログイン（アプリの所有者だけに表示）</h3>';
+    h += '<p class="note">学校外の指導者や保護者は、「ログイン用アプリ」でGoogleアカウントを確かめてから、このアプリに入ります。ログイン用アプリには、次の2つを設定してください（スクリプト プロパティ）。</p>';
+    h += '<table class="ftable"><tr><th>プロパティ</th><th>値</th></tr>' +
+      '<tr><td>MAIN_URL</td><td style="word-break:break-all">' + esc(l.appUrl) + '</td></tr>' +
+      '<tr><td>SHARED_SECRET</td><td>' + (state.showSecret ? '<code style="word-break:break-all">' + esc(l.secret) + '</code>' :
+        '<button class="mini" onclick="state.showSecret=true; renderAdmin()">合言葉を表示する</button>') +
+      '<br><small class="note">⚠ 合言葉は、ログイン用アプリの設定に貼り付けるだけにして、チャットやファイルには書かないでください</small></td></tr></table>';
+    h += '<div class="fbar"><span>ログイン用アプリのURL</span><input id="loginUrl" class="search" style="width:420px;border-radius:6px" value="' + esc(l.loginUrl) + '" placeholder="https://script.google.com/macros/s/…/exec">' +
+      '<button class="btn small" onclick="saveLoginUrl()">保存</button><span class="note" style="margin:0">' + (l.loginUrl ? '✅ 設定済み' : '未設定（学校外の人はまだログインできません）') + '</span></div>';
+    return h;
+  }
+  function saveLoginUrl() {
+    act0('api_setLoginUrl', document.getElementById('loginUrl').value).then(function (l) { if (l) { state.login = l; toast('保存しました'); renderAdmin(); } });
+  }
+
+  // ----- 👤 設定（保護者がメールのお知らせを切り替える） -----
+  function openSettings() {
+    const me = state.res.who.member;
+    if (me.role !== '保護者') { toast('いまは、保護者の方のメールのお知らせの設定だけがあります'); return; }
+    const on = !me.notify;
+    if (!confirm(on ? '新しい投稿を、1日1回メールで知らせるようにしますか？' : 'メールでのお知らせを止めますか？（アプリを開けば、いつでも新しい投稿を見られます）')) return;
+    act0('api_setMyNotify', on).then(function (r) { if (r) { me.notify = r.notify; toast(r.notify ? 'メールで知らせるようにしました' : 'メールのお知らせを止めました'); renderAll(); } });
+  }
+
+  function memberName(id) { const m = state.admin.members.filter(function (x) { return x.id === id; })[0]; return m ? m.name : '（不明）'; }
+
+  function membersHtml(a) {
+    let h = '';
+    if (state.editMember) h += memberFormHtml(state.editMember);
+    if (state.bulk) h += bulkHtml(state.bulk);
+    h += '<div class="fbar"><button class="btn small" onclick="editMember(null)">＋ メンバーを追加</button>' +
+      '<button class="btn sub small" onclick="openBulk()">📋 表からまとめて追加</button>' +
+      '<span class="note" style="margin:0">生徒はメールを使えないので、招待のメールは送りません。登録すれば、そのまま使えます。</span></div>';
+    const order = { '管理者': 0, '指導者': 1, '生徒': 2, '保護者': 3 };
+    const ms = a.members.slice().sort(function (x, y) {
+      return (x.status === '停止') - (y.status === '停止') || order[x.role] - order[y.role] || String(y.grade).localeCompare(String(x.grade)) || x.name.localeCompare(y.name, 'ja');
+    });
+    // まとめて削除：左の□で選ぶ（自分と所有者は選べない）
+    const sel = state.delSel || {};
+    const nSel = Object.keys(sel).filter(function (id) { return sel[id]; }).length;
+    const selectable = function (m) { return m.email.toLowerCase() !== a.owner && m.id !== state.res.who.member.id; };
+    if (nSel) h += '<div class="fbar"><b>' + nSel + '人を選んでいます</b><button class="btn sub small danger" onclick="deleteSelected()">選んだ人を名簿から削除</button>' +
+      '<button class="btn sub small" onclick="state.delSel={}; renderAdmin()">選ぶのをやめる</button></div>';
+    h += '<table class="ftable"><tr><th><input type="checkbox" title="全員を選ぶ" onclick="selectAllMembers(this.checked)"' + (nSel && nSel === ms.filter(selectable).length ? ' checked' : '') + '></th><th>表示名</th><th>区分</th><th>学年／子ども</th><th>メールアドレス</th><th>状態</th><th></th></tr>';
+    h += ms.map(function (m) {
+      const extra = m.role === '生徒' ? (m.grade ? m.grade + '年' : '') : m.role === '保護者' ? m.children.map(memberName).join('、') : '';
+      const box = selectable(m) ? '<input type="checkbox"' + (sel[m.id] ? ' checked' : '') + ' onclick="toggleDel(\'' + m.id + '\', this.checked)">' : '';
+      return '<tr style="' + (m.status === '停止' ? 'color:var(--sub)' : '') + (sel[m.id] ? ';background:#fdecea' : '') + '"><td>' + box + '</td><td>' + esc(m.name) + '</td><td>' + esc(m.role) + (m.isAdmin && m.role !== '管理者' ? '（管理者）' : '') +
+        '</td><td>' + esc(extra) + '</td><td>' + esc(m.email) + (m.notifyEmail ? '<br><small class="note">通知の送り先：' + esc(m.notifyEmail) + '</small>' : '') +
+        '</td><td>' + esc(m.status) + (m.notify ? '・通知' : '') +
+        '</td><td><button class="btn sub small" onclick="editMember(\'' + m.id + '\')">編集</button></td></tr>';
+    }).join('') + '</table>';
+    return h;
+  }
+
+  // ----- まとめて削除 -----
+  state.delSel = {};
+  function toggleDel(id, on) { state.delSel[id] = on; renderAdmin(); }
+  function selectAllMembers(on) {
+    state.delSel = {};
+    if (on) state.admin.members.forEach(function (m) {
+      if (m.email.toLowerCase() !== state.admin.owner && m.id !== state.res.who.member.id) state.delSel[m.id] = true;
+    });
+    renderAdmin();
+  }
+  function deleteSelected() {
+    const ids = Object.keys(state.delSel).filter(function (id) { return state.delSel[id]; });
+    const ms = state.admin.members.filter(function (m) { return ids.indexOf(m.id) >= 0; });
+    if (!ms.length) return;
+    const list = ms.slice(0, 10).map(function (m) { return '・' + m.name + '（' + m.role + '）'; }).join('\n') + (ms.length > 10 ? '\n…ほか' + (ms.length - 10) + '人' : '');
+    if (!confirm(ms.length + '人を名簿から削除します。\n\n' + list + '\n\n・名前とメールアドレスが消え、ログインできなくなります\n・フォルダの共有も外れます\n・過去の投稿は「（退会したメンバー）」として残ります\n\n元には戻せません。削除しますか？')) return;
+    let withParents = false;
+    const parents = state.admin.members.filter(function (p) {
+      return p.role === '保護者' && ids.indexOf(p.id) < 0 && p.children.some(function (c) { return ids.indexOf(c) >= 0; });
+    });
+    if (parents.length) {
+      withParents = confirm('選んだ生徒の保護者（' + parents.map(function (p) { return p.name; }).join('、') + '）も、名簿から削除しますか？\n\n［OK］保護者も削除する\n［キャンセル］保護者は残す\n\n※ほかの子どもが残っている保護者は残し、つながりだけを外します。');
+    }
+    act0('api_deleteMembers', ids, withParents).then(function (res) {
+      if (!res) return;
+      state.delSel = {};
+      toast(res.deleted.length + '人を名簿から削除しました');
+      afterAdmin(res);
+    });
+  }
+
+  // ----- 表からまとめて追加 -----
+  // スプレッドシートやExcelの表をコピーして貼り付ける（列の間はタブ）。1行目が見出しなら読み飛ばす
+  const BULK_COLS = ['表示名', 'メールアドレス', '区分', '学年', '子ども', '通知の送り先'];
+  state.bulk = null;
+  function openBulk() {
+    state.editMember = null;
+    state.bulk = { text: '', result: null };
+    renderAdmin();
+    document.getElementById('list').scrollTop = 0;
+  }
+  function parseBulk(text) {
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n').filter(function (l) { return l.trim(); });
+    const rows = lines.map(function (l) { return l.split(l.indexOf('\t') >= 0 ? '\t' : ',').map(function (s) { return s.trim(); }); });
+    if (rows.length && rows[0][0] === '表示名') rows.shift();
+    return rows.map(function (c) { return { name: c[0], email: c[1], role: c[2], grade: c[3], children: c[4], notifyEmail: c[5] }; });
+  }
+  function bulkHtml(b) {
+    let h = '<div class="composer"><b>表からまとめて追加</b>';
+    h += '<p class="note" style="margin:6px 0 0">スプレッドシートやExcelで、次の順に列を並べた表を作り、範囲をコピーして下に貼り付けてください（1行目の見出しはあってもなくてもかまいません）。</p>';
+    h += '<table class="ftable" style="margin-top:6px"><tr>' + BULK_COLS.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr>' +
+      '<tr><td>山田 太郎</td><td>（学校のアドレス）</td><td>生徒</td><td>2</td><td></td><td></td></tr>' +
+      '<tr><td>山田 太郎 母</td><td>（Googleアカウント）</td><td>保護者</td><td></td><td>山田 太郎</td><td>（空でよい）</td></tr>' +
+      '<tr><td>高橋コーチ</td><td>（Googleアカウント）</td><td>指導者</td><td></td><td></td><td></td></tr></table>';
+    h += '<p class="note" style="margin:4px 0 0">区分は「生徒・保護者・指導者・管理者」。学年は生徒だけ。子どもは保護者だけで、生徒の表示名を書きます（2人以上は「、」で区切る）。保護者は、1日1回のメールのお知らせを受け取る設定で登録します。</p>';
+    h += '<textarea id="bulkText" style="height:140px;font-family:monospace" placeholder="ここに貼り付け" oninput="state.bulk.text=this.value; state.bulk.result=null">' + esc(b.text) + '</textarea>';
+    const r = b.result;
+    if (r) {
+      const bad = r.rows.filter(function (x) { return x.errors.length; }).length;
+      h += '<p class="' + (r.ok ? '' : 'ng') + '" style="margin:8px 0 4px">' + (r.ok ? '✅ ' + r.rows.length + '人を登録できます。内容を確かめて「登録する」を押してください。' : '直す必要がある行が' + bad + '行あります。表を直して、もう一度「確かめる」を押してください（まだ登録していません）。') + '</p>';
+      h += '<table class="ftable"><tr><th>行</th><th>表示名</th><th>区分</th><th>学年／子ども</th><th>メールアドレス</th><th>確認</th></tr>' + r.rows.map(function (x) {
+        return '<tr' + (x.errors.length ? ' style="background:#fdecea"' : '') + '><td>' + x.line + '</td><td>' + esc(x.name) + '</td><td>' + esc(x.role) + '</td><td>' + esc(x.grade ? x.grade + '年' : x.children) +
+          '</td><td style="word-break:break-all">' + esc(x.email) + '</td><td>' + (x.errors.length ? '<span class="ng">' + esc(x.errors.join('／')) + '</span>' : 'OK') + '</td></tr>';
+      }).join('') + '</table>';
+    }
+    h += '<div class="row"><span style="flex:1"></span><button class="btn sub small" onclick="state.bulk=null; renderAdmin()">やめる</button>' +
+      '<button class="btn sub small" onclick="checkBulk()">確かめる</button>' +
+      (r && r.ok ? '<button class="btn small" onclick="saveBulk()">登録する（' + r.rows.length + '人）</button>' : '') + '</div></div>';
+    return h;
+  }
+  function checkBulk() {
+    const rows = parseBulk(state.bulk.text);
+    if (!rows.length) { toast('表を貼り付けてください'); return; }
+    act0('api_addMembers', rows, true).then(function (r) { if (r) { state.bulk.result = r; renderAdmin(); } });
+  }
+  function saveBulk() {
+    act0('api_addMembers', parseBulk(state.bulk.text), false).then(function (r) {
+      if (!r) return;
+      if (!r.ok) { state.bulk.result = r; renderAdmin(); toast('登録できない行があります'); return; }
+      state.bulk = null;
+      toast(r.added + '人を登録しました');
+      afterAdmin(r);
+    });
+  }
+
+  function editMember(id) {
+    state.bulk = null;
+    const m = id ? state.admin.members.filter(function (x) { return x.id === id; })[0] : null;
+    state.editMember = m ? JSON.parse(JSON.stringify(m)) : { id: '', email: '', name: '', role: '生徒', grade: '', adminFlag: false, children: [], status: '有効', notify: true };
+    renderAdmin();
+    document.getElementById('list').scrollTop = 0;
+  }
+
+  function memberFormHtml(m) {
+    const isOwner = m.email && m.email.toLowerCase() === state.admin.owner;
+    const students = state.admin.members.filter(function (x) { return x.role === '生徒' && x.status !== '停止'; });
+    const sel = function (id, opts, v, dis) {
+      return '<select id="' + id + '"' + (dis ? ' disabled' : '') + ' onchange="memberFormChange()">' + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+    };
+    let h = '<div class="composer"><b>' + (m.id ? 'メンバーを編集' : 'メンバーを追加') + '</b>';
+    h += '<div class="row"><span class="lbl">表示名</span><input id="mfName" value="' + esc(m.name) + '" placeholder="例：山田 太郎／山田 太郎 母"></div>';
+    h += '<div class="row"><span class="lbl">メール</span><input id="mfEmail" value="' + esc(m.email) + '" placeholder="Googleアカウントのメールアドレス"' + (isOwner ? ' disabled' : '') + '></div>';
+    h += '<div class="row"><span class="lbl">区分</span>' + sel('mfRole', ROLES, m.role, isOwner) + '</div>';
+    h += '<div class="row"><span class="lbl"></span><ul class="role-desc">' + (ROLE_DESC[m.role] || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>';
+    if (m.role === '生徒') h += '<div class="row"><span class="lbl">学年</span>' + sel('mfGrade', ['1', '2', '3'], String(m.grade || '1')) + '年</div>';
+    if (m.role === '指導者') h += '<div class="row"><span class="lbl"></span><label><input type="checkbox" id="mfAdmin"' + (m.adminFlag ? ' checked' : '') + '> アプリの管理者にする（メンバーの登録やチャンネルの設定ができる）</label></div>';
+    if (m.role === '保護者') {
+      h += '<div class="row"><span class="lbl">子ども</span><span>' + (students.map(function (s) {
+        return '<label style="margin-right:10px"><input type="checkbox" class="mfChild" value="' + s.id + '"' + (m.children.indexOf(s.id) >= 0 ? ' checked' : '') + '> ' + esc(s.name) + '</label>';
+      }).join('') || '先に生徒を登録してください') + '</span></div>';
+      h += '<div class="row"><span class="lbl"></span><label><input type="checkbox" id="mfNotify"' + (m.notify ? ' checked' : '') + '> 新しい投稿を、1日1回メールで知らせる</label></div>';
+      h += '<div class="row"><span class="lbl">通知の<br>送り先</span><input id="mfNotifyEmail" value="' + esc(m.notifyEmail || '') + '" placeholder="空ならログインのアドレスに送る（ふだん読んでいるメールが別のとき入力）" style="flex:1;min-width:200px"></div>';
+    }
+    if (m.id && !isOwner) h += '<div class="row"><span class="lbl">状態</span>' + sel('mfStatus', ['有効', '停止'], m.status) + '<span class="note" style="margin:0">停止すると、ログインできなくなり、フォルダの共有も外れます</span></div>';
+    const canDelete = m.id && !isOwner && m.id !== state.res.who.member.id;
+    h += '<div class="row">' + (canDelete ? '<button class="btn sub small danger" onclick="deleteMember()">名簿から削除</button>' : '') +
+      '<span style="flex:1"></span><button class="btn sub small" onclick="state.editMember=null; renderAdmin()">やめる</button><button class="btn small" onclick="saveMember()">保存</button></div></div>';
+    return h;
+  }
+
+  /** 名簿から削除する（卒業・退会のとき）。過去の投稿は残る */
+  function deleteMember() {
+    const m = state.editMember;
+    if (!confirm('「' + m.name + '」を名簿から削除します。\n\n・名前とメールアドレスが消え、ログインできなくなります\n・フォルダの共有も外れます\n・過去の投稿は「（退会したメンバー）」として残ります\n\n元には戻せません。削除しますか？')) return;
+    let withParents = false;
+    if (m.role === '生徒') {
+      const parents = state.admin.members.filter(function (x) { return x.role === '保護者' && x.children.indexOf(m.id) >= 0; });
+      if (parents.length) {
+        withParents = confirm('この生徒の保護者（' + parents.map(function (p) { return p.name; }).join('、') + '）も、名簿から削除しますか？\n\n［OK］保護者も削除する\n［キャンセル］保護者は残す\n\n※ほかの子どもも登録されている保護者は残し、この生徒とのつながりだけを外します。');
+      }
+    }
+    act0('api_deleteMember', m.id, withParents).then(function (res) {
+      if (!res) return;
+      state.editMember = null;
+      toast('名簿から削除しました：' + res.deleted.join('、'));
+      afterAdmin(res);
+    });
+  }
+
+  /** フォームの入力を state.editMember に写す（区分を変えると、出す欄が変わるため） */
+  function readMemberForm() {
+    const m = state.editMember, v = function (id) { const el = document.getElementById(id); return el ? el : null; };
+    m.name = v('mfName').value; m.email = v('mfEmail').value; m.role = v('mfRole').value;
+    if (v('mfGrade')) m.grade = v('mfGrade').value;
+    if (v('mfAdmin')) m.adminFlag = v('mfAdmin').checked;
+    if (v('mfNotify')) m.notify = v('mfNotify').checked;
+    if (v('mfNotifyEmail')) m.notifyEmail = v('mfNotifyEmail').value;
+    if (v('mfStatus')) m.status = v('mfStatus').value;
+    if (document.querySelector('.mfChild')) m.children = Array.prototype.filter.call(document.querySelectorAll('.mfChild'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+  }
+  function memberFormChange() { readMemberForm(); renderAdmin(); }
+  function saveMember() {
+    readMemberForm();
+    const m = state.editMember;
+    if (m.role === '保護者' && !m.children.length && !confirm('子どもが選ばれていません。このまま保存しますか？')) return;
+    act0('api_saveMember', m).then(function (res) { if (!res) return; state.editMember = null; toast('保存しました'); afterAdmin(res); });
+  }
+
+  /** 管理の操作を送る（画面のデータの入れ替えは afterAdmin で行う） */
+  function act0(fn) {
+    const args = [fn, token, asId].concat(Array.prototype.slice.call(arguments, 1));
+    document.body.classList.add('busy');
+    return call.apply(null, args).catch(function (e) { toast('できませんでした：' + (e.message || e)); return null; })
+      .finally(function () { document.body.classList.remove('busy'); });
+  }
+
+  function channelsHtml(a) {
+    let h = '';
+    if (state.newCh) {
+      h += '<div class="composer"><b>新しいチャンネル</b><div class="row"><span class="lbl">フォルダ名</span><input id="ncName" placeholder="例：24 磁石の研究（先頭の番号で並びます）"></div>' +
+        '<div class="row"><span class="lbl">場所</span><select id="ncPlace"><option value="club">活動の共有ドライブ（ふつうはこちら）</option><option value="admin">先生だけの共有ドライブ（隠す必要があるとき・「保護者のみ」にするとき）</option></select></div>' +
+        '<div class="row"><span class="note" style="margin:0">種類は「生徒全員」で始まります。あとで変えられます。</span><span style="flex:1"></span><button class="btn sub small" onclick="state.newCh=false; renderAdmin()">やめる</button><button class="btn small" onclick="createChannel()">作る</button></div></div>';
+    }
+    if (state.editChMembers) h += chMembersFormHtml(state.editChMembers);
+    h += '<div class="fbar"><button class="btn small" onclick="state.newCh=true; renderAdmin()">＋ 新しいチャンネル</button>' +
+      '<button class="btn sub small" onclick="syncNow()">ドライブを読み直す</button>' +
+      '<span class="note" style="margin:0">ドライブのフォルダが、フォルダ名の順に全部並びます。ドライブで新しく作ったフォルダは「チャンネルにしない」で並びます。</span></div>';
+    h += '<table class="ftable"><tr><th>フォルダ</th><th>種類</th><th>見られる人</th><th>欠席連絡用</th></tr>';
+    h += a.channels.map(function (c) {
+      const missing = c.status !== '有効';
+      const who = { all: '先生・指導者・生徒全員', public: '先生・指導者・生徒全員・保護者全員', parents: '先生・指導者・保護者全員（生徒は見られない）', off: '—' }[c.type] ||
+        ('先生・指導者・選んだ生徒（' + c.members.length + '人） <button class="mini" onclick="editChMembers(\'' + c.id + '\')">選ぶ</button>');
+      return '<tr style="' + (c.type === 'off' || missing ? 'color:var(--sub)' : '') + '"><td>📁 ' + esc((c.no ? c.no + ' ' : '') + c.name) +
+        (c.place === 'admin' ? '<br><small>（先生だけの共有ドライブ）</small>' : '') + (missing ? '<br><small class="ng">フォルダが見つかりません（ゴミ箱に入っていませんか）</small><br><button class="btn sub small danger" style="margin-top:4px" onclick="removeChannel(\'' + c.id + '\')">🗑 一覧から消す</button>' : '') +
+        (c.type === 'parents' && c.place !== 'admin' ? '<br><small class="ng">⚠ 活動の共有ドライブにあるので、生徒がドライブからファイルを見られます。先生だけの共有ドライブに新しいチャンネルを作り、こちらは別の種類にしてください</small>' : '') + '</td>' +
+        '<td><select onchange="setChType(\'' + c.id + '\', this)"' + (missing ? ' disabled' : '') + '>' + TYPE_NAMES.map(function (t) {
+          // 「保護者のみ」は、先生だけの共有ドライブのフォルダだけ（活動の共有ドライブのファイルは、生徒がドライブから見られるため）
+          const blocked = t[0] === 'parents' && c.place !== 'admin' && c.type !== 'parents';
+          return '<option value="' + t[0] + '"' + (c.type === t[0] ? ' selected' : '') + (blocked ? ' disabled' : '') + '>' + t[1] + (blocked ? '（先生だけの共有ドライブのみ）' : '') + '</option>';
+        }).join('') + '</select></td><td>' + who + '</td>' +
+        '<td style="text-align:center"><input type="checkbox"' + (c.purpose === 'absence' ? ' checked' : '') + (c.type === 'off' ? ' disabled' : '') + ' onchange="setChPurpose(\'' + c.id + '\', this.checked)"></td></tr>';
+    }).join('') + '</table>';
+    h += '<p class="note">⚠「限定メンバー」「保護者のみ」でも、活動の共有ドライブにあるフォルダのファイルは、生徒（コンテンツ管理者）がドライブから見られます。隠したいファイルを扱うチャンネルは、先生だけの共有ドライブに作ってください。</p>';
+    return h;
+  }
+
+  function setChType(id, el) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    const v = el.value;
+    const forParents = function (t) { return t === 'public' || t === 'parents'; };
+    if (forParents(c.type) && !forParents(v) && !confirm('「' + c.name + '」は、保護者が見られなくなり、フォルダの共有も外れます。よろしいですか？')) { el.value = c.type; return; }
+    if (v === 'parents' && c.place !== 'admin') { alert('「保護者のみ」は、先生だけの共有ドライブのフォルダにしか設定できません。\n活動の共有ドライブのファイルは、生徒がドライブから見られるためです。\n\n「＋ 新しいチャンネル」で、場所を「先生だけの共有ドライブ」にして作ってください。'); el.value = c.type; return; }
+    if (v === 'members' && c.place !== 'admin' && !confirm('「' + c.name + '」のフォルダは活動の共有ドライブにあるので、選んでいない生徒も、ドライブからファイルを見られます。\n生徒どうしで見えても困らないファイルだけなら、このままでかまいません。よろしいですか？')) { el.value = c.type; return; }
+    if (v === 'off' && !confirm('「' + c.name + '」をチャンネルの一覧から外します。スレッドとフォルダは消えずに残り、あとで戻せます。よろしいですか？')) { el.value = c.type; return; }
+    act0('api_setChannelType', id, v).then(function (res) { if (res) { toast('「' + c.name + '」を「' + TYPE_NAMES.filter(function (t) { return t[0] === v; })[0][1] + '」にしました'); afterAdmin(res); } });
+  }
+  function removeChannel(id) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    if (!confirm('「' + c.name + '」を、チャンネルの一覧から消しますか？' + String.fromCharCode(10) + String.fromCharCode(10) + 'フォルダをゴミ箱から戻せば、また使えます。消したあとでフォルダを戻すと、新しいチャンネルとして並びます（前のスレッドはアプリに出なくなります）。')) return;
+    act0('api_removeChannel', id).then(function (res) { if (res) { toast('「' + c.name + '」を一覧から消しました' + (res.threads ? '（スレッド' + res.threads + '件はデータに残ります）' : '')); afterAdmin(res); } });
+  }
+  function setChPurpose(id, on) { act0('api_setChannelPurpose', id, on ? 'absence' : '').then(function (res) { if (res) afterAdmin(res); }); }
+  function editChMembers(id) { state.editChMembers = id; renderAdmin(); document.getElementById('list').scrollTop = 0; }
+  function chMembersFormHtml(id) {
+    const c = state.admin.channels.filter(function (x) { return x.id === id; })[0];
+    const students = state.admin.members.filter(function (x) { return x.role === '生徒' && x.status !== '停止'; })
+      .sort(function (x, y) { return String(y.grade).localeCompare(String(x.grade)) || x.name.localeCompare(y.name, 'ja'); });
+    return '<div class="composer"><b>「' + esc(c.name) + '」に参加する生徒</b><div class="row">' + students.map(function (s) {
+      return '<label style="margin-right:12px"><input type="checkbox" class="cmChk" value="' + s.id + '"' + (c.members.indexOf(s.id) >= 0 ? ' checked' : '') + '> ' + esc(s.name) + (s.grade ? '（' + s.grade + '年）' : '') + '</label>';
+    }).join('') + '</div><div class="row"><span style="flex:1"></span><button class="btn sub small" onclick="state.editChMembers=null; renderAdmin()">やめる</button>' +
+      '<button class="btn small" onclick="saveChMembers(\'' + id + '\')">保存</button></div></div>';
+  }
+  function saveChMembers(id) {
+    const ids = Array.prototype.filter.call(document.querySelectorAll('.cmChk'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+    act0('api_setChannelMembers', id, ids).then(function (res) { if (res) { state.editChMembers = null; toast('保存しました'); afterAdmin(res); } });
+  }
+  function createChannel() {
+    const name = document.getElementById('ncName').value.trim();
+    if (!name) { toast('フォルダ名を入れてください'); return; }
+    act0('api_newChannel', name, document.getElementById('ncPlace').value).then(function (home) {
+      if (!home) return; state.newCh = false; state.home = home; toast('「' + name + '」を作りました'); afterAdmin();
+    });
+  }
+  function coachNewChannel() {
+    const name = prompt('新しいチャンネルのフォルダ名（例：24 磁石の研究）\n活動の共有ドライブにフォルダを作り、「生徒全員」のチャンネルにします。');
+    if (!name || !name.trim()) return;
+    act0('api_newChannel', name.trim(), 'club').then(function (home) { if (home) { state.home = home; toast('作りました'); renderAll(); } });
+  }
+  function syncNow() { act0('api_syncNow').then(function (a) { if (a) { state.admin = a; toast('ドライブを読み直しました'); renderAll(); } }); }
+
+  function absencesHtml(a) {
+    let h = '<p class="note">欠席連絡のチャンネルで送られた連絡を、日付の順にまとめています（2週間前から）。生徒本人からの分と、保護者からの分の両方です。</p>';
+    h += '<table class="ftable"><tr><th>日付</th><th>生徒</th><th>種類</th><th>送った人</th><th>🔒 先生・指導者へのメモ</th></tr>';
+    h += a.absences.map(function (x) {
+      return '<tr style="' + (x.isPast ? 'color:var(--sub)' : '') + '"><td>' + mdw(x.date) + '</td><td>' + esc(x.student) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.from) + '（' + esc(x.fromRole) + '）</td>' +
+        '<td style="white-space:pre-wrap">' + esc(x.note) + '</td></tr>';
+    }).join('') || '<tr><td colspan="5">まだありません</td></tr>';
+    return h + '</table>';
+  }
+
+  // ----- 欠席連絡 -----
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  function mdw(d) { const x = new Date(d + 'T00:00:00'); return (x.getMonth() + 1) + '/' + x.getDate() + '（' + WD[x.getDay()] + '）'; }
+  function todayStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  // 入力中の欠席連絡（新着の確認で画面を描き直しても消えないように、ここに覚えておく）
+  state.absDraft = null;
+  function openAbsence() {
+    state.absence = !state.absence; state.composing = false;
+    state.absDraft = { who: '', date: todayStr(), kind: '欠席', note: '' };
+    renderThreads();
+  }
+  function absInput(k, v) { if (state.absDraft) state.absDraft[k] = v; }
+  function absenceFormHtml(ch) {
+    const me = state.res.who.member;
+    const d = state.absDraft || { who: '', date: todayStr(), kind: '欠席', note: '' };
+    const opt = function (id, label) { return '<option value="' + id + '"' + (d.who === id ? ' selected' : '') + '>' + label + '</option>'; };
+    const onWho = ' onchange="absInput(\'who\', this.value)"';
+    let who;
+    if (me.role === '保護者') {
+      const kids = me.childrenInfo || [];
+      who = kids.length ? '<select id="absWho"' + onWho + '>' + kids.map(function (k) { return opt(k.id, esc(k.name)); }).join('') + '</select>'
+        : '<span class="ng">お子さんが登録されていません。管理者の先生に伝えてください。</span>';
+    } else if (me.role === '生徒') {
+      who = '<b>' + esc(me.name) + '</b>';
+    } else {
+      // 先生が代わりに登録する
+      const st = state.res.students || [];
+      who = '<select id="absWho"' + onWho + '>' + opt('', '（生徒を選ぶ）') + st.map(function (s) {
+        return opt(s.id, esc(s.name) + (s.grade ? '（' + s.grade + '年）' : ''));
+      }).join('') + '</select><span class="note" style="margin:0 0 0 8px">先生が代わりに登録します（「' + esc(me.name) + 'が登録」と表示されます）</span>';
+    }
+    return '<div class="composer abs"><b>📝 欠席連絡</b>' +
+      '<div class="row"><span class="lbl">だれが</span>' + who + '</div>' +
+      '<div class="row"><span class="lbl">いつ</span><input type="date" id="absDate" value="' + esc(d.date) + '" onchange="absInput(\'date\', this.value)"></div>' +
+      '<div class="row"><span class="lbl">種類</span>' + ['欠席', '遅刻', '早退'].map(function (k) {
+        return '<label style="margin-right:12px"><input type="radio" name="absKind" value="' + k + '"' + (d.kind === k ? ' checked' : '') + ' onchange="absInput(\'kind\', this.value)"> ' + k + '</label>';
+      }).join('') + '</div>' +
+      '<div class="row"><span class="lbl">先生・指導者<br>へのメモ</span><textarea id="absNote" class="abs-memo" maxlength="500" placeholder="（任意）先生と指導者だけに伝えたいこと。理由など" oninput="absInput(\'note\', this.value)">' + esc(d.note) + '</textarea></div>' +
+      '<div class="row"><span class="lbl"></span><span class="note" style="margin:0">「だれが・いつ・種類」は、このチャンネルを見られる人全員に見えます。<br>' +
+      '🔒 メモは<b>先生と指導者だけ</b>に見えます（ほかの保護者や生徒には見えません）。</span></div>' +
+      '<div class="row"><span style="flex:1"></span>' +
+      '<button class="btn sub small" onclick="state.absence=false; renderThreads()">やめる</button><button class="btn small" onclick="sendAbsence(\'' + ch.id + '\')">送信</button></div></div>';
+  }
+  function sendAbsence(chId) {
+    const sel = document.getElementById('absWho');
+    const date = document.getElementById('absDate').value;
+    const kind = document.querySelector('input[name=absKind]:checked').value;
+    if (!date) { toast('日付を選んでください'); return; }
+    if (state.res.who.member.role !== '生徒' && (!sel || !sel.value)) { toast('生徒を選んでください'); return; }
+    const note = (document.getElementById('absNote').value || '').trim();
+    act('api_absence', chId, sel ? sel.value : '', date, kind, note).then(function (ok) {
+      if (!ok) return;
+      state.absence = false; state.absDraft = null;
+      toast('欠席連絡を送りました：' + mdw(date) + ' ' + kind);
+      renderAll();
+    });
+  }
+
+  // ----- 検索 -----
+  function doSearch(q) {
+    q = String(q || '').trim();
+    if (!q) return;
+    state.view = 'search';
+    state.search = { q: q, results: null };
+    renderAll();
+    call('api_search', token, asId, q).then(function (r) {
+      if (!state.search || state.search.q !== q) return;
+      state.search.results = r; renderAll();
+    }).catch(function (e) { toast('検索できませんでした：' + (e.message || e)); });
+  }
+  function renderSearch() {
+    const s = state.search;
+    document.getElementById('title').textContent = '🔍 検索：' + s.q;
+    document.getElementById('tabs').innerHTML = '';
+    const list = document.getElementById('list');
+    if (!s.results) { list.innerHTML = '<p class="note">探しています…</p>'; return; }
+    const words = s.q.split(/\s+/).filter(String);
+    const mark = function (text) {
+      let h = esc(text);
+      words.forEach(function (w) { h = h.split(esc(w)).join('<mark>' + esc(w) + '</mark>'); });
+      return h;
+    };
+    let h = '<p class="note">「' + esc(s.q) + '」を含む投稿：' + s.results.length + '件' + (s.results.length >= 100 ? '（新しい100件まで）' : '') + '。押すと、そのスレッドを開きます。</p>';
+    h += s.results.map(function (r) {
+      const ch = chById(r.channelId);
+      return '<div class="thread result" onclick="openResult(\'' + r.channelId + '\', \'' + r.threadId + '\')"><div class="t-top"><span class="chtag"># ' + esc(ch ? ch.name : '') + '</span>' +
+        '<span>' + esc(r.author) + '・' + shortTime(r.createdAt) + '</span></div><div class="post"><div class="body">' +
+        (r.body ? '<div class="text">' + mark(r.body) + '</div>' : '') +
+        (r.files.length ? '<div class="note" style="margin:4px 0 0">📎 ' + r.files.map(mark).join('、') + '</div>' : '') + '</div></div></div>';
+    }).join('');
+    list.innerHTML = h;
+  }
+  function openResult(chId, tid) {
+    go(chId);
+    state.openFolds[tid] = true; // 探した投稿が折りたたまれて見えなくならないように開く
+    renderThreads(); watchUnread();
+    const el = document.querySelector('.thread[data-tid="' + tid + '"]');
+    if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); setTimeout(function () { el.classList.remove('flash'); }, 2000); }
+  }
+</script>
+</body>
+</html>
